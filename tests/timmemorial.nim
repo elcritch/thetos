@@ -1,8 +1,8 @@
 import std/unittest
 
-import nim_repo
+import immemorial
 
-suite "nim_repo":
+suite "immemorial":
   test "greets by name":
     check greet("Nim") == "hello, Nim"
 
