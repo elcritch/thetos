@@ -1,7 +1,7 @@
 ## FlexVec tests. Built with `-d:thetosDebug` (for `checkInvariants`) and
 ## `-d:thetosTrackAllocs` (for leak checks); see tflexvec.nims.
 
-import std/[unittest, random, hashes]
+import std/[unittest, random, hashes, options]
 when defined(thetosTestLocal):
   import thetos/local # the same tests, against the thread-local variants
 else:
@@ -333,3 +333,23 @@ suite "FlexVec exception safety":
           discard w.checkInvariants()
         check v == snapshot
       check failures > 0
+
+suite "FlexVec updateIt":
+  test "updates one element of a concatenated vector":
+    let v = toFlexVec([1, 2, 3]) & toFlexVec([4, 5])
+    let w = v.updateIt(3, it * 10)
+    check v[3] == 4 and w[3] == 40 and w.len == 5
+
+suite "FlexVec get":
+  test "get and getOrDefault do not raise":
+    let v = toFlexVec([10, 20]) & toFlexVec([30])
+    check v.get(2) == some(30)
+    check v.get(3).isNone and v.get(-1).isNone
+    check v.getOrDefault(0) == 10 and v.getOrDefault(9, -1) == -1
+
+  test "get represents a stored nil as none":
+    var fallback: int
+    let missing: ptr int = nil
+    let v = toFlexVec([missing, addr fallback])
+    check v.get(0).isNone and v.get(1).get == addr fallback
+    check v.getOrDefault(0, addr fallback) == nil

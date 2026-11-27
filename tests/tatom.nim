@@ -55,3 +55,12 @@ suite "Atom":
       )
     check a.load().len == 100
     check a.load()[99] == 100
+
+suite "Atom updateIt":
+  test "updates with an expression of it":
+    var a: Atom[int]
+    a.updateIt(it + 1)
+    check a.updateIt(it * 10) == 10
+    var step = 5
+    check a.updateIt(it + step) == 15 # the expression can use locals
+    check a.load() == 15

@@ -49,6 +49,17 @@ proc `[]`*[T](b: Box[T]): lent T =
     raise newException(ValueError, "empty Box")
   b.node.value
 
+proc get*[T](b: Box[T]): Option[T] =
+  ## The boxed value, or `none` for an empty box.
+  if b.isEmpty:
+    none(T)
+  else:
+    option(ownedCopy(b[]))
+
+proc getOrDefault*[T](b: Box[T], def: T = default(T)): T =
+  ## The boxed value, or `def` for an empty box.
+  if b.isEmpty: def else: b[]
+
 proc update*[T, F](b: sink Box[T], f: F): Box[T] =
   ## Returns a box holding `f(b[])`. Reuses the allocation when `b` is
   ## uniquely owned.
@@ -66,7 +77,20 @@ proc unbox*[T](b: sink Box[T]): T =
   elif isUnique(b.node):
     result = move(b.node.value)
   else:
-    result = b.node.value
+    resetOnError(result):
+      result = b.node.value
+
+template updateIt*[T](b: Box[T], op: untyped): Box[T] =
+  ## Like `update`, with the new value given as an expression of `it`, the
+  ## boxed value: `numbers.updateIt(it & 4)`. The value is moved out rather
+  ## than copied when `b` is its only owner. Raises `ValueError` for an
+  ## empty box, like `update`.
+  block:
+    var source = b
+    if source.isEmpty:
+      raise newException(ValueError, "empty Box")
+    let it {.inject.} = unbox(move source)
+    box[T](op)
 
 proc `==`*[T](a, b: Box[T]): bool =
   if a.node == b.node:

@@ -76,7 +76,7 @@ proc get*[K, V](m: TrieMap[K, V], key: K): Option[V] =
   if e == nil:
     none(V)
   else:
-    some(e.value)
+    option(ownedCopy(e.value))
 
 proc `[]=`*[K, V](m: var TrieMap[K, V], key: K, value: sink V) =
   ## Sets `key` in this map value only; other copies are not affected.
@@ -112,6 +112,21 @@ proc update*[K, V, F](m: sink TrieMap[K, V], key: K, f: F): TrieMap[K, V] =
     else:
       f(e.value)
   result[key] = next
+
+template updateIt*[K, V](m: TrieMap[K, V], key: K, op: untyped): TrieMap[K, V] =
+  ## Like `update`, with the new value given as an expression of `it`, the
+  ## current value (`default(V)` when `key` is missing):
+  ## `m.updateIt("hits", it + 1)`.
+  block:
+    var updated = m
+    let updateKey = key
+    resetOnError(updated):
+      let it {.inject.} = updated.getOrDefault(updateKey)
+      var next: V
+      resetOnError(next):
+        next = op
+      updated[updateKey] = move(next)
+    updated
 
 proc toTrieMap*[K, V](pairs: openArray[(K, V)]): TrieMap[K, V] =
   for (k, v) in pairs:

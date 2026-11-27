@@ -39,6 +39,13 @@ proc checkModel[K, V](m: TrieMap[K, V], model: Table[K, V]) =
     check m[k] == v
 
 suite "TrieMap":
+  test "get represents a stored nil as none":
+    var fallback: int
+    let missing: ptr int = nil
+    let m = toTrieMap({1: missing, 2: addr fallback})
+    check m.get(1).isNone and m.get(2).get == addr fallback
+    check m.getOrDefault(1, addr fallback) == nil
+
   test "empty map":
     let m = initTrieMap[int, int]()
     check m.len == 0
@@ -315,3 +322,10 @@ suite "TrieMap diff":
       inc n
     check n == 2
     check keyCompares < 100
+
+suite "TrieMap updateIt":
+  test "updates present and missing keys":
+    let m = toTrieMap({"hits": 1})
+    let n = m.updateIt("hits", it + 1).updateIt("misses", it + 5)
+    check m["hits"] == 1 and "misses" notin m
+    check n["hits"] == 2 and n["misses"] == 5 # missing keys start at default(V)

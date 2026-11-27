@@ -246,6 +246,20 @@ proc first*[T](v: FlexVec[T]): lent T =
 proc last*[T](v: FlexVec[T]): lent T =
   v[v.size - 1]
 
+proc get*[T](v: FlexVec[T], i: int): Option[T] =
+  ## Element `i`, or `none` when `i` is out of range (including negative).
+  if i >= 0 and i < v.len:
+    option(ownedCopy(v[i]))
+  else:
+    none(T)
+
+proc getOrDefault*[T](v: FlexVec[T], i: int, def: T = default(T)): T =
+  ## Element `i`, or `def` when `i` is out of range (including negative).
+  if i >= 0 and i < v.len:
+    v[i]
+  else:
+    def
+
 proc newPath[T](level: int, node: FlexPtr[T]): FlexPtr[T] =
   if level == 0:
     return node
@@ -697,6 +711,20 @@ proc update*[T, F](v: sink FlexVec[T], i: Natural, f: F): FlexVec[T] =
   resetOnError(result):
     let next = f(result[i])
     result[i] = next
+
+template updateIt*[T](v: FlexVec[T], i: Natural, op: untyped): FlexVec[T] =
+  ## Like `update`, with the new element given as an expression of `it`,
+  ## the current element: `v.updateIt(2, it * 10)`.
+  block:
+    var updated = v
+    let index = i
+    resetOnError(updated):
+      let it {.inject.} = ownedCopy(updated[index])
+      var next: T
+      resetOnError(next):
+        next = op
+      updated[index] = move(next)
+    updated
 
 proc take*[T](v: sink FlexVec[T], n: Natural): FlexVec[T] =
   ## Returns the first `n` elements, in O(log n).

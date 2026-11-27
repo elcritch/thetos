@@ -1,4 +1,4 @@
-import std/[unittest, random]
+import std/[unittest, random, options]
 when defined(thetosTestLocal):
   import thetos/local # the same tests, against the thread-local variants
 else:
@@ -128,3 +128,29 @@ suite "TrieVec":
 
 suite "TrieVec exception safety":
   vectorCopyTests(toTrieVec)
+
+suite "TrieVec updateIt":
+  test "updates one element":
+    var v: TrieVec[int]
+    for i in 0 ..< 100:
+      v.add i
+    let w = v.updateIt(70, it * 10)
+    check v[70] == 70 and w[70] == 700 and w[69] == 69
+    expect IndexDefect:
+      discard v.updateIt(100, it)
+
+suite "TrieVec get":
+  test "get and getOrDefault do not raise":
+    let v = toTrieVec([10, 20, 30])
+    check v.get(1) == some(20)
+    check v.get(3).isNone and v.get(-1).isNone
+    check v.getOrDefault(2) == 30
+    check v.getOrDefault(5) == 0 and v.getOrDefault(-2, 7) == 7
+    check default(TrieVec[int]).get(0).isNone
+
+  test "get represents a stored nil as none":
+    var fallback: int
+    let missing: ptr int = nil
+    let v = toTrieVec([missing, addr fallback])
+    check v.get(0).isNone and v.get(1).get == addr fallback
+    check v.getOrDefault(0, addr fallback) == nil

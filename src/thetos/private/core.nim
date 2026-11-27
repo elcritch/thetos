@@ -154,6 +154,11 @@ template resetOnCopyError*(T: typedesc, value, body: untyped) =
     resetOnError(value):
       body
 
+proc ownedCopy*[T](value: T): T {.inline.} =
+  ## Clean up a partial copy if an element hook raises.
+  resetOnError(result):
+    result = value
+
 proc appendCopy*[V, T](v: var V, x: T) {.inline.} =
   mixin add
   when supportsCopyMem(T):

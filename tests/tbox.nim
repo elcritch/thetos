@@ -1,4 +1,4 @@
-import std/[unittest, with]
+import std/[unittest, with, options]
 when defined(thetosTestLocal):
   import thetos/local # the same tests, against the thread-local variants
 else:
@@ -106,3 +106,39 @@ suite "Box":
       touch()
       touch()
     check calls == 4
+
+suite "Box updateIt":
+  test "updates with an expression of it":
+    let a = box(@[1, 2, 3])
+    let b = a.updateIt(it & 4)
+    check a[] == @[1, 2, 3] and b[] == @[1, 2, 3, 4]
+    expect ValueError:
+      discard default(Box[int]).updateIt(it + 1)
+
+  test "updateIt uses the boxed type for its expression":
+    check box(1'i8).updateIt(0)[] == 0'i8
+
+  test "updateIt moves the value out of a sole owner":
+    # The expression builds a new Counted, so any copy comes from unboxing.
+    var a = box(Holder(item: Counted(id: 1), label: "x"))
+    copies = 0
+    let shared = a.updateIt(Holder(item: Counted(id: it.item.id + 1), label: "y"))
+    check copies == 1 # `a` is used below: its value is copied out
+    copies = 0
+    let moved = move(a).updateIt(Holder(item: Counted(id: it.item.id + 2), label: "z"))
+    check copies == 0
+    check shared.item.id == 2 and moved.item.id == 3
+
+suite "Box get":
+  test "get and getOrDefault do not raise":
+    check box("x").get() == some("x")
+    check default(Box[string]).get().isNone
+    check box(3).getOrDefault() == 3
+    check default(Box[int]).getOrDefault() == 0
+    check default(Box[int]).getOrDefault(9) == 9
+
+  test "get represents a stored nil as none":
+    var fallback: int
+    let missing: ptr int = nil
+    check box(missing).get().isNone
+    check box(missing).getOrDefault(addr fallback) == nil

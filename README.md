@@ -60,6 +60,19 @@ transient and rvalue optimizations automatically: filling a map in a loop
 with `[]=` (or `m = m.put(...)`) costs about the same as a mutable table.
 Once a version is shared, its nodes are path-copied.
 
+Lookups that can fail have non-raising versions: `get` returns an
+`Option` and `getOrDefault` a fallback value, for map keys
+(`m.get(key)`), vector indices (`v.get(i)`, where an out-of-range or
+negative index gives `none`) and boxes (`b.get()` on an empty box).
+For pointer-like element types, Nim’s `Option` represents a stored nil
+as `none`. Use `getOrDefault` to keep a stored nil and supply a fallback
+for a missing entry.
+
+Every `update` that takes a function also has an `updateIt` template that
+takes an expression of `it` instead, like `mapIt` in `std/sequtils`:
+`m.updateIt("hits", it + 1)`, `v.updateIt(2, it * 10)`,
+`counter.updateIt(it + 1)`.
+
 Iterators walk a snapshot, so reassigning the source variable inside the
 loop is safe.
 
@@ -114,8 +127,8 @@ assert "changed 2: two -> deux" in changes
 ```
 
 API: `initTrieMap`, `toTrieMap`, `len`, `contains`/`in`, `hasKey`, `[]`,
-`getOrDefault`, `get`, `[]=`, `del`, `put`, `erase`, `update`, `pairs`,
-`keys`, `values`, `diff`, `==`, `hash`, `$`.
+`getOrDefault`, `get`, `[]=`, `del`, `put`, `erase`, `update`, `updateIt`,
+`pairs`, `keys`, `values`, `diff`, `==`, `hash`, `$`.
 
 ## TrieSet
 
@@ -176,8 +189,9 @@ assert sum == 2 + 6
 ```
 
 API: `initTrieVec`, `toTrieVec`, `len`, `high`, `low`, `[]` (also `^i`),
-`first`, `last`, `[]=`, `add`, `pop`, `pushBack`, `popBack`, `put`,
-`update`, `take`, `&`, `items`, `pairs`, `==`, `hash`, `$`.
+`first`, `last`, `get`, `getOrDefault`, `[]=`, `add`, `pop`, `pushBack`,
+`popBack`, `put`, `update`, `updateIt`, `take`, `&`, `items`, `pairs`, `==`,
+`hash`, `$`.
 
 ## FlexVec
 
@@ -270,8 +284,8 @@ Every `copyWith` or `update` copies the whole value unless it can be moved, and
 `TrieMap` and the other thetos containers for large fields: they copy in
 O(1).
 
-API: `box`, `[]`, `copyWith`, `update`, `unbox`, `isEmpty`, `boxAccessors`,
-`==`, `hash`, `$`.
+API: `box`, `[]`, `get`, `getOrDefault`, `copyWith`, `update`, `updateIt`,
+`unbox`, `isEmpty`, `boxAccessors`, `==`, `hash`, `$`.
 
 ## Atom
 
@@ -320,7 +334,49 @@ for d in diff(snapshot, current.load()):
 assert added == @[9]
 ```
 
-API: `initAtom`, `load`, `store`, `exchange`, `update`.
+API: `initAtom`, `load`, `store`, `exchange`, `update`, `updateIt`.
+
+### AtomRef
+
+An `Atom` is a location, so it cannot be copied or passed around.
+`AtomRef[T]` is a reference-counted handle to one shared atom: copies are
+O(1) and share it, so you can store a handle in other objects or give one
+to each thread, and every holder sees every update. The atom is freed when
+the last handle goes away. This is what `std::shared_ptr<immer::atom<T>>`
+does in C++.
+
+Each store also bumps a version counter. A holder that keeps a snapshot can
+call `refresh` as often as it likes: it costs one atomic read, and reloads
+the snapshot only when something was stored since.
+
+```nim
+import std/typedthreads
+import thetos
+
+let settings = newAtomRef(toTrieMap({"mode": "fast"}))
+
+proc worker(s: AtomRef[TrieMap[string, string]]) {.thread.} =
+  var snapshot: TrieMap[string, string]
+  var seen = -1                          # forces the first load
+  while true:
+    if s.refresh(snapshot, seen):        # reloads only after a store
+      if snapshot.getOrDefault("mode") == "stop":
+        break
+
+var t: Thread[AtomRef[TrieMap[string, string]]]
+createThread(t, worker, settings)        # the thread gets its own handle
+settings.update do (m: TrieMap[string, string]) -> TrieMap[string, string]:
+  m.put("mode", "stop")
+joinThread(t)
+assert settings.version == 1
+```
+
+`AtomRef` has the same `load`, `store`, `exchange` and `update` as `Atom`,
+and the same compile-time check on what `T` may hold. `==` and `hash`
+compare which atom two handles refer to, not the values.
+
+API: `newAtomRef`, `load`, `store`, `exchange`, `update`, `updateIt`,
+`version`, `refresh`, `isNil`, `==`, `hash`, `$`.
 
 ## Thread-safety contract
 

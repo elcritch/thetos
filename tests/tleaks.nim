@@ -110,6 +110,31 @@ suite "leaks":
       copiesBeforeFailure = -1
       check a.load().value[] == 1
 
+  test "throwing element copies release getter and updateIt temporaries":
+    checkNoLeaks:
+      let b = box(fallibleValue(1))
+      let m = toTrieMap({1: fallibleValue(1)})
+      let v = toTrieVec([fallibleValue(1)])
+      let f = toFlexVec([fallibleValue(1)])
+      template failsCleanly(action: untyped) =
+        copiesBeforeFailure = 0
+        try:
+          expect ValueError:
+            discard action
+        finally:
+          copiesBeforeFailure = -1
+
+      failsCleanly(b.get())
+      failsCleanly(m.get(1))
+      failsCleanly(v.get(0))
+      failsCleanly(f.get(0))
+      failsCleanly(b.updateIt(it))
+      failsCleanly(m.updateIt(1, it))
+      failsCleanly(v.updateIt(0, it))
+      failsCleanly(f.updateIt(0, it))
+      check b[].value[] == 1 and m[1].value[] == 1
+      check v[0].value[] == 1 and f[0].value[] == 1
+
   test "throwing copies release partial map clones":
     checkNoLeaks:
       var m = toTrieMap({1: fallibleValue(1), 2: fallibleValue(2)})
