@@ -806,12 +806,27 @@ iterator chunks*[T](v: FlexVec[T]): (ptr UncheckedArray[T], int) =
   ## valid while the vector is alive.
   let keep = `=dup`(v)
   if keep.size > 0:
-    let off = keep.treeSize
-    var i = 0
-    while i < off:
-      let (leaf, start) = leafAt(keep.root, keep.shift, i)
-      yield (leaf.elemArr, leaf.count)
-      i = start + leaf.count
+    if keep.root != nil:
+      if keep.shift == 0:
+        yield (keep.root.elemArr, keep.root.count)
+      else:
+        # Depth-first walk: each node is visited once.
+        var stack: array[16, tuple[node: FlexPtr[T], next: int]]
+        var sp = 0
+        stack[0] = (keep.root, 0)
+        while sp >= 0:
+          let node = stack[sp].node
+          let next = stack[sp].next
+          if next >= node.count:
+            dec sp
+            continue
+          stack[sp].next = next + 1
+          let child = node.childArr[next]
+          if child.leaf:
+            yield (child.elemArr, child.count)
+          else:
+            inc sp
+            stack[sp] = (child, 0)
     yield (keep.tail.elemArr, keep.tail.count)
 
 iterator items*[T](v: FlexVec[T]): lent T =

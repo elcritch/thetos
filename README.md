@@ -295,6 +295,10 @@ Offsets count bytes, as with `string`; keep them on UTF-8 code point
 boundaries. Indexing a single byte is O(log n), so for short strings that
 are mostly read, `ImmStr` or `string` is faster.
 
+[docs/benchmark_std_string.md](docs/benchmark_std_string.md) compares
+`string`, `ImmStr` and `FlexStr` across copying, hashing, reading, building
+and editing, with a summary of when to use which.
+
 API: `toFlexStr`, `len`, `[]` (also `^i` and slices), `take`, `drop`, `&`,
 `add`, `insert`, `erase`, `replace`, `isEmpty`, `$`, `toImmStr`, `items`,
 `pairs`, `runes`, `runeLen`, `startsWith`, `endsWith`, `==`, `hash`.
