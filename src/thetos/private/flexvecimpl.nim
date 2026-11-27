@@ -126,18 +126,23 @@ proc findChild[T](n: FlexPtr[T], s, idx: int): (int, int) {.inline.} =
   else:
     (idx shr bits, idx and ((1 shl bits) - 1))
 
-proc finishInner[T](n: FlexPtr[T], s: int) =
-  ## Fills the size table of a freshly built inner node and marks it regular
-  ## when every child but the last is full.
-  var total = 0
+proc finishInner[T](n: FlexPtr[T], s: int, sizes: openArray[int]): int {.discardable.} =
+  ## Fills the size table of a freshly built inner node from the sizes of
+  ## its children, marks it regular when every child but the last is full,
+  ## and returns its size.
   var regular = true
   for k in 0 ..< n.count:
-    let size = subtreeSize(n.childArr[k], s - flexBits)
-    if k < n.count - 1 and size != 1 shl childShift(T, s):
+    if k < n.count - 1 and sizes[k] != 1 shl childShift(T, s):
       regular = false
-    total += size
-    n.sizeArr[k] = total
+    result += sizes[k]
+    n.sizeArr[k] = result
   n.relaxed = not regular
+
+proc finishInner[T](n: FlexPtr[T], s: int): int {.discardable.} =
+  var sizes {.noinit.}: array[flexWidth, int]
+  for k in 0 ..< n.count:
+    sizes[k] = subtreeSize(n.childArr[k], s - flexBits)
+  finishInner(n, s, toOpenArray(sizes, 0, n.count - 1))
 
 proc relax[T](n: FlexPtr[T], s: int) =
   finishInner(n, s)
@@ -527,6 +532,7 @@ const maxMerge = 2 * flexWidth
 type MergeBuf[T] = object
   ## Owned nodes made by `executePlan`, released unless handed on.
   nodes: array[maxMerge, FlexPtr[T]]
+  sizes: array[maxMerge, int] ## elements below each node
   len: int
 
 proc `=destroy`[T](b: MergeBuf[T]) =
@@ -574,6 +580,7 @@ proc executePlan[T](all: openArray[FlexPtr[T]], level: int, res: var MergeBuf[T]
     if offset == 0 and all[idx].count == target:
       retain(all[idx])
       res.nodes[res.len] = all[idx]
+      res.sizes[res.len] = subtreeSize(all[idx], level)
       inc res.len
       inc idx
       continue
@@ -599,8 +606,11 @@ proc executePlan[T](all: openArray[FlexPtr[T]], level: int, res: var MergeBuf[T]
       if offset == src.count:
         inc idx
         offset = 0
-    if level > 0:
-      finishInner(node, level)
+    res.sizes[res.len - 1] =
+      if level > 0:
+        finishInner(node, level)
+      else:
+        node.count
 
 proc rebalance[T](left, center, right: FlexPtr[T], s: int): FlexPtr[T] =
   ## Merges the children of `left` (all but its last), of `center` (owned,
@@ -625,18 +635,20 @@ proc rebalance[T](left, center, right: FlexPtr[T], s: int): FlexPtr[T] =
   var nodes: MergeBuf[T]
   executePlan(toOpenArray(all, 0, count - 1), s - flexBits, nodes)
   result = allocFlexInner[T]()
+  var sizes: array[2, int]
   var k = 0
   while k < nodes.len:
     let n = allocFlexInner[T]()
+    let first = k
     while k < nodes.len and n.count < flexWidth:
       n.childArr[n.count] = nodes.nodes[k]
       inc n.count
       inc k
-    finishInner(n, s)
+    sizes[result.count] = finishInner(n, s, toOpenArray(nodes.sizes, first, k - 1))
     result.childArr[result.count] = n
     inc result.count
   nodes.len = 0 # handed to the new nodes
-  finishInner(result, s + flexBits)
+  finishInner(result, s + flexBits, toOpenArray(sizes, 0, result.count - 1))
 
 proc concatSub[T](left: FlexPtr[T], ls: int, right: FlexPtr[T], rs: int): FlexPtr[T] =
   ## Concatenates `left` (level `ls`) and `right` (level `rs`) into a new
