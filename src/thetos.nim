@@ -4,6 +4,8 @@
 ## * `TrieMap[K, V] <thetos/triemap.html>`_: CHAMP hash map
 ## * `TrieSet[T] <thetos/trieset.html>`_: CHAMP hash set
 ## * `TrieVec[T] <thetos/trievec.html>`_: radix-balanced vector
+## * `FlexVec[T] <thetos/flexvec.html>`_: relaxed radix-balanced vector with
+##   O(log n) concatenation and slicing
 ## * `Box[T] <thetos/box.html>`_: shared immutable value
 ## * `Atom[T] <thetos/atom.html>`_: lock-free cell for publishing new
 ##   versions between threads
@@ -17,8 +19,8 @@
 ## `-d:thetosSingleThread` to use plain, non-atomic reference counts. `Atom`
 ## is not available in that mode.
 
-import thetos/[triemap, trieset, trievec, box]
-export triemap, trieset, trievec, box
+import thetos/[triemap, trieset, trievec, flexvec, box]
+export triemap, trieset, trievec, flexvec, box
 
 when not defined(thetosSingleThread):
   import thetos/atom

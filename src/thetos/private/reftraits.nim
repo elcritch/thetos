@@ -3,7 +3,7 @@
 ## are not atomic. Modeled on `containsRefs` in sigils' `isolateutils`.
 
 import std/macros
-import ../[triemap, trieset, trievec, box]
+import ../[triemap, trieset, trievec, flexvec, box]
 
 proc holdsRefs(typ: NimNode, visited: var seq[NimNode]): bool {.compileTime.} =
   case typ.kind
@@ -36,8 +36,8 @@ proc holdsRefs(typ: NimNode, visited: var seq[NimNode]): bool {.compileTime.} =
     if typ.kind == nnkBracketExpr:
       # thetos containers hide their elements behind raw pointers.
       if typ[0] == bindSym"TrieMap" or typ[0] == bindSym"TrieSet" or
-          typ[0] == bindSym"TrieVec" or typ[0] == bindSym"Box" or typ[0].eqIdent("seq") or
-          typ[0].eqIdent("array"):
+          typ[0] == bindSym"TrieVec" or typ[0] == bindSym"FlexVec" or
+          typ[0] == bindSym"Box" or typ[0].eqIdent("seq") or typ[0].eqIdent("array"):
         for i in 1 ..< typ.len:
           if holdsRefs(typ[i], visited):
             return true
