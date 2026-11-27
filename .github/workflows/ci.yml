@@ -58,7 +58,7 @@ jobs:
         run: atlas-run tests --only-errors -- $NIM_ARGS
 
       - name: Run container tests with --threads:off
-        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tflexvec tbox -- $NIM_ARGS --threads:off
+        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tflexvec tbox timmstr tflexstr -- $NIM_ARGS --threads:off
 
       - name: Run container tests against thetos/local
-        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tflexvec tbox -- $NIM_ARGS -d:thetosTestLocal
+        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tflexvec tbox timmstr tflexstr -- $NIM_ARGS -d:thetosTestLocal

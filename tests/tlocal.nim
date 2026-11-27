@@ -26,6 +26,8 @@ suite "thetos/local":
     check not (local.TrieVec[int] is thetos.TrieVec[int])
     check not (local.FlexVec[int] is thetos.FlexVec[int])
     check not (local.Box[int] is thetos.Box[int])
+    check not (local.ImmStr is thetos.ImmStr)
+    check not (local.FlexStr is thetos.FlexStr)
 
   test "both kinds work in one program":
     var scratch = local.toTrieMap({"a": 1})
@@ -55,6 +57,11 @@ suite "thetos/local":
 
     check holdsLocalContainers(local.TrieMap[int, int])
     check holdsLocalContainers(local.Box[string])
+    check holdsLocalContainers(local.ImmStr)
+    check holdsLocalContainers(local.FlexStr)
+    check holdsLocalContainers(thetos.TrieMap[thetos.ImmStr, local.ImmStr])
+    check not holdsLocalContainers(thetos.ImmStr)
+    check not holdsLocalContainers(thetos.FlexStr)
     check holdsLocalContainers(thetos.TrieMap[int, local.TrieVec[int]])
     check holdsLocalContainers(seq[local.FlexVec[int]])
     check holdsLocalContainers(LocalValue)

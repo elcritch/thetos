@@ -7,6 +7,9 @@
 ## * `FlexVec[T] <thetos/flexvec.html>`_: relaxed radix-balanced vector with
 ##   O(log n) concatenation and slicing
 ## * `Box[T] <thetos/box.html>`_: shared immutable value
+## * `ImmStr <thetos/immstr.html>`_: immutable string with O(1) copies
+## * `FlexStr <thetos/flexstr.html>`_: persistent string (rope) with
+##   O(log n) concatenation, slicing and editing
 ## * `Atom[T] <thetos/atom.html>`_: lock-free cell for publishing new
 ##   versions between threads, and `AtomRef[T]`, a copyable handle to one
 ##   shared atom
@@ -22,5 +25,5 @@
 ## this module. A program built with `--threads:off` cannot share values
 ## between threads at all, so there every container uses plain counts.
 
-import thetos/[triemap, trieset, trievec, flexvec, box, atom]
-export triemap, trieset, trievec, flexvec, box, atom
+import thetos/[triemap, trieset, trievec, flexvec, box, atom, immstr, flexstr]
+export triemap, trieset, trievec, flexvec, box, atom, immstr, flexstr

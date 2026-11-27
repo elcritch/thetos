@@ -13,7 +13,7 @@ proc testFiles(): seq[string] =
 # --threads:off (plain reference counts) and, with -d:thetosTestLocal,
 # against thetos/local.
 const containerTests = ["tests/ttriemap.nim", "tests/ttrieset.nim", "tests/ttrievec.nim",
-  "tests/tflexvec.nim", "tests/tbox.nim"]
+  "tests/tflexvec.nim", "tests/tbox.nim", "tests/timmstr.nim", "tests/tflexstr.nim"]
 
 task test, "run unit tests":
   for testFile in testFiles():

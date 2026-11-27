@@ -346,8 +346,23 @@ proc add*[T](v: var FlexVec[T], x: sink T) =
   inc v.size
 
 proc add*[T](v: var FlexVec[T], xs: openArray[T]) =
-  for x in xs:
-    appendCopy(v, x)
+  ## Appends every element of `xs` to this vector value only.
+  when supportsCopyMem(T):
+    # Plain data: fill the tail a leaf at a time.
+    var i = 0
+    while i < xs.len:
+      if v.tail != nil and v.tail.count < flexWidth and isUnique(v.tail):
+        let k = min(flexWidth - v.tail.count, xs.len - i)
+        copyMem(addr v.tail.elemArr[v.tail.count], unsafeAddr xs[i], k * sizeof(T))
+        v.tail.count += k
+        v.size += k
+        i += k
+      else:
+        v.add(xs[i]) # allocates, pushes or unshares the tail
+        inc i
+  else:
+    for x in xs:
+      appendCopy(v, x)
 
 proc assocRec[T](slot: var FlexPtr[T], s, idx: int, value: var T) =
   ensureOwned(slot)
@@ -784,6 +799,20 @@ proc erase*[T](v: sink FlexVec[T], i: Natural): FlexVec[T] =
 proc toFlexVec*[T](xs: openArray[T]): FlexVec[T] =
   resetOnError(result):
     result.add(xs)
+
+iterator chunks*[T](v: FlexVec[T]): (ptr UncheckedArray[T], int) =
+  ## Low-level: the elements in order, as contiguous runs of up to 32
+  ## (one leaf each), given as a pointer and a length. The pointers stay
+  ## valid while the vector is alive.
+  let keep = `=dup`(v)
+  if keep.size > 0:
+    let off = keep.treeSize
+    var i = 0
+    while i < off:
+      let (leaf, start) = leafAt(keep.root, keep.shift, i)
+      yield (leaf.elemArr, leaf.count)
+      i = start + leaf.count
+    yield (keep.tail.elemArr, keep.tail.count)
 
 iterator items*[T](v: FlexVec[T]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned

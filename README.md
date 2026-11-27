@@ -12,14 +12,16 @@ except the changed path, and every older version stays valid. Nodes use
 versions can be handed between threads with no locks, under `--mm:arc`,
 `--mm:orc` or `--mm:atomicArc`.
 
-| thetos          | immer                | Structure                                   |
-|-----------------|----------------------|---------------------------------------------|
-| `TrieMap[K, V]` | `immer::map`         | CHAMP hash trie, 32-way, 64-bit hashes      |
-| `TrieSet[T]`    | `immer::set`         | CHAMP hash trie                             |
-| `TrieVec[T]`    | `immer::vector`      | 32-way radix-balanced tree with tail        |
-| `FlexVec[T]`    | `immer::flex_vector` | relaxed radix-balanced (RRB) tree with tail |
-| `Box[T]`        | `immer::box`         | refcounted immutable value                  |
-| `Atom[T]`       | `immer::atom`        | lock-free cell to publish new versions      |
+| thetos          | immer                      | Structure                                   |
+|-----------------|----------------------------|---------------------------------------------|
+| `TrieMap[K, V]` | `immer::map`               | CHAMP hash trie, 32-way, 64-bit hashes      |
+| `TrieSet[T]`    | `immer::set`               | CHAMP hash trie                             |
+| `TrieVec[T]`    | `immer::vector`            | 32-way radix-balanced tree with tail        |
+| `FlexVec[T]`    | `immer::flex_vector`       | relaxed radix-balanced (RRB) tree with tail |
+| `Box[T]`        | `immer::box`               | refcounted immutable value                  |
+| `ImmStr`        | (no equivalent)            | immutable string, O(1) copies               |
+| `FlexStr`       | `immer::flex_vector<char>` | persistent string (rope) on an RRB tree     |
+| `Atom[T]`       | `immer::atom`              | lock-free cell to publish new versions      |
 
 ## Quick start
 
@@ -39,7 +41,8 @@ assert w[0] == 1              # `w` still sees the old element
 
 `import thetos` brings in every container. Each one also has its own
 module (`thetos/triemap`, `thetos/trieset`, `thetos/trievec`,
-`thetos/flexvec`, `thetos/box`, `thetos/atom`). Thread-local variants with
+`thetos/flexvec`, `thetos/box`, `thetos/atom`, `thetos/immstr`,
+`thetos/flexstr`). Thread-local variants with
 non-atomic reference counts live in `thetos/local`; see
 [Thread-local containers](#thread-local-containers).
 
@@ -231,6 +234,70 @@ operations.
 
 API: everything `TrieVec` has, plus `drop`, `[a .. b]`, `add` of another
 `FlexVec`, `pushFront`, `insert`, `erase`, and `toFlexVec` from a `TrieVec`.
+
+## ImmStr
+
+`ImmStr` is an immutable string whose bytes live in one reference-counted
+allocation, with a hash computed once. Copying one is O(1), where copying a
+`string` copies every byte. That matters inside thetos: path copying copies
+the entries of every node it clones, and every `Atom.load` copies its
+payload. Use `ImmStr` for keys and values that are copied around a lot.
+
+```nim
+import std/hashes
+import thetos
+
+let name = toImmStr("wörld")
+let greeting = "hello, " & name               # builds a new ImmStr
+assert greeting.len == 13 and greeting.runeLen == 12   # bytes vs code points
+assert greeting.startsWith("hello") and greeting.find(name.toOpenArray) == 7
+assert $greeting[7 .. ^1] == "wörld"
+assert hash(name) == hash("wörld")             # same hash as the string
+
+var counts = initTrieMap[ImmStr, int]()        # O(1) key copies
+counts[name] = 1
+assert counts[toImmStr("wörld")] == 1
+```
+
+Like `string`, an `ImmStr` holds bytes, so UTF-8 text works as usual:
+`len` and indexing count bytes, and `runes`, `runeLen` and `validateUtf8`
+work with code points. `toOpenArray` and `toCString` give views of the
+bytes without copying. Building a new string (`&`, slicing) copies; use
+`FlexStr` for long text that is edited often.
+
+API: `toImmStr`, `len`, `[]` (also `^i` and slices), `isEmpty`,
+`toOpenArray`, `toCString`, `$`, `items`, `pairs`, `runes`, `runeLen`,
+`validateUtf8`, `&`, `find`, `contains`/`in`, `startsWith`, `endsWith`,
+`==`, `cmp`, `<`, `<=`, `hash`.
+
+## FlexStr
+
+`FlexStr` is a persistent string: a rope of bytes on the same
+relaxed radix-balanced tree as `FlexVec`. Concatenation, slicing,
+`insert`, `erase` and `replace` are O(log n) and share structure with
+their inputs, and every old version stays valid. That suits text that is
+edited often and needs history, like an editor buffer with undo.
+
+```nim
+import thetos
+
+var history = @[toFlexStr("hello wörld")]
+history.add history[^1].insert(5, ",")            # O(log n) each
+history.add history[^1].replace(7 .. 12, "there")
+history.add history[^1] & "!"
+
+assert $history[^1] == "hello, there!"
+assert $history[0] == "hello wörld"               # every version is intact
+assert history[0].runeLen == 11
+```
+
+Offsets count bytes, as with `string`; keep them on UTF-8 code point
+boundaries. Indexing a single byte is O(log n), so for short strings that
+are mostly read, `ImmStr` or `string` is faster.
+
+API: `toFlexStr`, `len`, `[]` (also `^i` and slices), `take`, `drop`, `&`,
+`add`, `insert`, `erase`, `replace`, `isEmpty`, `$`, `toImmStr`, `items`,
+`pairs`, `runes`, `runeLen`, `startsWith`, `endsWith`, `==`, `hash`.
 
 ## Box
 
@@ -456,6 +523,28 @@ automatically. Nothing in the API changes, and `Atom` still works.
   including with plain reference counts.
 * thetos requires Nim 2.2.12 or later. Nim 2.2.10 can leak allocations when
   a copy raises during a vector update or `Atom.update`.
+
+## References
+
+The data structures follow these papers:
+
+* Phil Bagwell. *Ideal Hash Trees.* EPFL technical report, 2001. The hash
+  array mapped trie (HAMT).
+* Michael J. Steindorfer and Jurgen J. Vinju. *Optimizing Hash-Array Mapped
+  Tries for Fast and Lean Immutable JVM Collections.* OOPSLA 2015. CHAMP,
+  the HAMT variant behind `TrieMap` and `TrieSet`, and the basis for `diff`.
+* Phil Bagwell and Tiark Rompf. *RRB-Trees: Efficient Immutable Vectors.*
+  EPFL technical report, 2011. Relaxed radix-balanced trees, behind
+  `FlexVec` and `FlexStr`; `TrieVec` is the regular (unrelaxed) case.
+* Nicolas Stucki, Tiark Rompf, Vlad Ureche and Phil Bagwell. *RRB Vector:
+  A Practical General Purpose Immutable Sequence.* ICFP 2015.
+* Jean Niklas L'orange. *Improving RRB-Tree Performance through
+  Transience.* Master's thesis, NTNU, 2014. The concatenation rebalancing
+  plan that `FlexVec` uses.
+* Juan Pedro Bolívar Puente. *Persistence for the Masses: RRB-Vectors in a
+  Systems Language.* ICFP 2017. The design of immer, which thetos follows.
+* Anthony Williams. *C++ Concurrency in Action*, 2nd edition, 2019. Split
+  reference counting, which `Atom` uses for lock-free loads.
 
 ## Development
 

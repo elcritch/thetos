@@ -10,7 +10,7 @@
 ## their private node types to find those elements through type aliases.
 
 import std/macros
-import ../[box, flexvec, local, triemap, trieset, trievec]
+import ../[box, flexvec, immstr, local, triemap, trieset, trievec]
 
 type
   Finding = enum
@@ -24,6 +24,7 @@ type
       v: trievec.TrieVec[int],
       f: flexvec.FlexVec[int],
       b: box.Box[int],
+      i: immstr.ImmStr,
     ]
 
   LocalContainers =
@@ -33,6 +34,7 @@ type
       v: local.TrieVec[int],
       f: local.FlexVec[int],
       b: local.Box[int],
+      i: local.ImmStr,
     ]
 
 proc nodeTypes(containers: NimNode): seq[NimNode] {.compileTime.} =
@@ -40,7 +42,15 @@ proc nodeTypes(containers: NimNode): seq[NimNode] {.compileTime.} =
     for field in entry[^2].getTypeImpl()[2]:
       let fieldType = field[^2].getTypeImpl()
       if fieldType.kind == nnkPtrTy:
-        result.add fieldType[0][0]
+        # Generic node types (`ptr Node[T]`) are matched by their generic
+        # symbol; non-generic ones (`ImmStr`'s byte node) by themselves.
+        let target = fieldType[0]
+        result.add(
+          if target.kind == nnkBracketExpr:
+            target[0]
+          else:
+            target
+        )
         break
 
 proc scan(
@@ -75,13 +85,18 @@ proc scan(
     return visit(typ[0])
   of nnkPtrTy:
     let node = typ[0]
+    let base =
+      if node.kind == nnkBracketExpr:
+        node[0]
+      else:
+        node
+    if base in localNodes:
+      result.incl fLocal
+    elif base notin defaultNodes:
+      return
+    when not compileOption("threads"):
+      result.incl fLocal # without threads, the default containers use plain counts
     if node.kind == nnkBracketExpr:
-      if node[0] in localNodes:
-        result.incl fLocal
-      elif node[0] notin defaultNodes:
-        return
-      when not compileOption("threads"):
-        result.incl fLocal # without threads, the default containers use plain counts
       for i in 1 ..< node.len:
         result = result + visit(node[i])
   of nnkBracketExpr, nnkSym:

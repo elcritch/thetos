@@ -28,7 +28,7 @@ runnableExamples:
   assert scratch.len == 4 and shared.len == 3
   assert scratch[0] == shared[0]
 
-import std/[bitops, hashes, macros, options]
+import std/[atomics, bitops, hashes, macros, options, typetraits, unicode]
 import ./private/core
 export DiffKind
 
@@ -40,3 +40,5 @@ include ./private/triesetimpl
 include ./private/trievecimpl
 include ./private/flexvecimpl
 include ./private/boximpl
+include ./private/immstrimpl
+include ./private/flexstrimpl
