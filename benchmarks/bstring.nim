@@ -232,7 +232,7 @@ for n in [65536, 1048576]:
     for k in 0 ..< N:
       sink0 += (f & f).len
 
-section("Inserting 8 bytes in the middle (new version each time)")
+section("Inserting 8 bytes at a random offset (new version each time)")
 for n in [65536, 1048576]:
   let s = text(n)
   let f = toFlexStr(s)
@@ -256,15 +256,15 @@ block:
   bench("string s[a .. b]", N):
     for k in 0 ..< N:
       let a = next(n div 2)
-      sink0 += s[a .. a + n div 2].len
+      sink0 += s[a ..< a + n div 2].len
   bench("ImmStr s[a .. b]", N):
     for k in 0 ..< N:
       let a = next(n div 2)
-      sink0 += i[a .. a + n div 2].len
+      sink0 += i[a ..< a + n div 2].len
   bench("FlexStr s[a .. b]", N):
     for k in 0 ..< N:
       let a = next(n div 2)
-      sink0 += f[a .. a + n div 2].len
+      sink0 += f[a ..< a + n div 2].len
 
 section("Editing a 64 KiB document 1000 times, keeping every version")
 block:

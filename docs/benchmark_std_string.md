@@ -15,26 +15,25 @@ operations, to show where each one is the right choice.
 
 ## Setup
 
-* Apple M3 Pro, macOS, Nim 2.2.12.
+* Apple M3 Pro, macOS 15.7.9, Nim 2.2.12. Measured on 2026-11-27.
 * `nim r -d:danger benchmarks/bstring.nim`, with the repository's
   `config.nims` (`--mm:atomicArc --threads:on`), so `ImmStr` and `FlexStr`
-  use atomic reference counts. The thread-local variants in `thetos/local`
-  would be somewhat faster on copies.
+  use atomic reference counts.
 * Each figure is the best of 7 runs, divided by the number of operations
   per run. The text is mixed ASCII and multi-byte UTF-8.
-* Lower is better. Results vary by a few percent between runs; treat
-  differences under about 20% as noise.
+* Times are per operation unless a row specifies per byte. Small inputs
+  are particularly sensitive to timing variation.
 
 ## Summary
 
 | Workload | Best choice | Why |
 |---|---|---|
-| Strings copied a lot: map keys and values, `Atom` payloads, `Box` fields | `ImmStr` | Copies are a reference count increment at any size; a 64 KiB `string` copy is 150× slower. |
-| Hashing the same strings repeatedly (map keys) | `ImmStr` | The hash is cached: 1.6 ns at any size, against 2.7 µs to hash 64 KiB. |
+| Strings copied a lot: map keys and values, `Atom` payloads, `Box` fields | `ImmStr` | An `ImmStr` copy increments a reference count. Copying the 64 KiB `string` took 153× as long. |
+| Hashing the same strings repeatedly (map keys) | `ImmStr` | A cached 64 KiB hash took 1.6 ns. Hashing the same bytes as a `string` took 2.71 µs. |
 | Reading, comparing, scanning | `string` or `ImmStr` | Both are flat buffers. `FlexStr` pays for a tree walk and scattered leaves. |
-| Building text byte by byte | `string` | Amortized appends to one buffer: 3× faster than `FlexStr`. |
-| Editing large text: insert, delete, concatenate, slice | `FlexStr` | O(log n): 2.7 µs to insert into 1 MiB, against 303 µs for `string`. |
-| Keeping many versions of large text (undo, history, snapshots) | `FlexStr` | Versions share structure: 1.8 MiB for 1,001 versions of a 64 KiB document, against 66.5 MiB. |
+| Building text byte by byte | `string` | Appending to one buffer took 2.2 ns per byte. Appending to the rope took 7.0 ns. |
+| Editing large text: insert, delete, concatenate, slice | `FlexStr` | Inserting 8 bytes into 1 MiB took 2.75 µs with `FlexStr` and 257.8 µs with `string`. |
+| Keeping many versions of large text (undo, history, snapshots) | `FlexStr` | Retaining 1,001 versions of a 64 KiB document used 1.8 MiB with `FlexStr` and 66.5 MiB with `string`. |
 
 The two thetos types complement each other. `ImmStr` makes strings cheap
 to *share*, and `FlexStr` makes them cheap to *edit and version*. Neither
@@ -48,20 +47,20 @@ Copying one value into an array slot.
 
 | Size | `string` | `ImmStr` | `FlexStr` |
 |---:|---:|---:|---:|
-| 16 B | 4.7 ns | 3.7 ns | 9.3 ns |
-| 1 KiB | 13.1 ns | 3.8 ns | 9.1 ns |
-| 64 KiB | 586.8 ns | 3.8 ns | 9.0 ns |
+| 16 B | 13.9 ns | 4.4 ns | 15.2 ns |
+| 1 KiB | 13.1 ns | 3.8 ns | 9.2 ns |
+| 64 KiB | 579.8 ns | 3.8 ns | 9.2 ns |
 
-`ImmStr` and `FlexStr` copies cost the same at any size: an atomic
-increment (`FlexStr` holds two node references, so it costs about twice as
-much). A `string` copy allocates and copies every byte.
+Copying either persistent type shares its existing storage. `ImmStr`
+holds one node reference. A `FlexStr` with both a tree and a tail holds
+two. A `string` copy allocates and copies the bytes.
 
 ### Copies inside thetos
 
 | Operation | `string` | `ImmStr` |
 |---|---:|---:|
-| `TrieMap[int, V].put` on a shared 10k-entry map, 1 KiB values | 697.3 ns | 352.7 ns |
-| `Atom[V].load` of a 1 KiB value | 18.9 ns | 6.0 ns |
+| `TrieMap[int, V].put` on a shared 10k-entry map, 1 KiB values | 658.7 ns | 358.1 ns |
+| `Atom[V].load` of a 1 KiB value | 19.4 ns | 6.1 ns |
 
 A persistent update path-copies the nodes it changes, and copying a node
 copies every entry in it: up to 32 values per level. With `string` values
@@ -75,9 +74,9 @@ reuse a result.
 
 | Size | `string` | `ImmStr` (cached after first) | `FlexStr` |
 |---:|---:|---:|---:|
-| 16 B | 2.4 ns | 1.6 ns | 23.3 ns |
-| 1 KiB | 43.1 ns | 1.6 ns | 178.8 ns |
-| 64 KiB | 2679.9 ns | 1.6 ns | 11149.0 ns |
+| 16 B | 2.4 ns | 1.6 ns | 22.3 ns |
+| 1 KiB | 43.9 ns | 1.6 ns | 180.4 ns |
+| 64 KiB | 2713.1 ns | 1.6 ns | 11219.8 ns |
 
 `ImmStr` computes its hash on first use (the same cost as hashing a
 `string`, and the same value) and caches it. `FlexStr` flattens itself to
@@ -91,21 +90,21 @@ Equal values in separate allocations.
 | Size | `string` | `ImmStr` | `FlexStr` |
 |---:|---:|---:|---:|
 | 16 B | 1.6 ns | 3.5 ns | 7.3 ns |
-| 1 KiB | 20.2 ns | 21.1 ns | 103.5 ns |
-| 64 KiB | 1406.8 ns | 1367.5 ns | 6775.5 ns |
+| 1 KiB | 20.2 ns | 21.0 ns | 103.5 ns |
+| 64 KiB | 1337.4 ns | 1365.6 ns | 6738.1 ns |
 
 `string` and `ImmStr` both compare one buffer with `memcmp`. `ImmStr`
 returns at once for two copies of the same value (same buffer), and rejects
 early when both hashes are cached and differ. `FlexStr` walks the two trees
 together and stops at the first unequal byte range. On separately allocated
-64 KiB values this took 6.78 µs, down from 13.16 µs when equality built a
+64 KiB values this took 6.74 µs, down from 13.16 µs when equality built a
 temporary list of leaves.
 
 ### Reading
 
 | Operation, 64 KiB | `string` | `ImmStr` | `FlexStr` |
 |---|---:|---:|---:|
-| Random byte `s[i]` | 0.8 ns | 0.6 ns | 5.0 ns |
+| Random byte `s[i]` | 0.8 ns | 0.6 ns | 6.1 ns |
 | Iterating every byte (per byte) | 0.1 ns | 0.1 ns | 0.2 ns |
 
 Indexing a `FlexStr` walks the tree, O(log n). Iterating is nearly as fast
@@ -115,9 +114,9 @@ as a flat buffer because it visits each leaf once.
 
 | Operation | `string` | `ImmStr` | `FlexStr` |
 |---|---:|---:|---:|
-| Appending 64 KiB one byte at a time (per byte) | 2.1 ns | n/a | 6.9 ns |
-| `a & b`, 64 KiB each | 1135.2 ns | 1173.1 ns | 1930.8 ns |
-| `a & b`, 1 MiB each | 24775.4 ns | 24777.9 ns | 2805.4 ns |
+| Appending 64 KiB one byte at a time (per byte) | 2.2 ns | n/a | 7.0 ns |
+| `a & b`, 64 KiB each | 1162.3 ns | 1226.7 ns | 1956.6 ns |
+| `a & b`, 1 MiB each | 25282.5 ns | 25277.9 ns | 2775.4 ns |
 
 `ImmStr` has no in-place append: it is immutable, and each `&` builds a new
 buffer. Concatenation is O(n) for the flat types and O(log n) for
@@ -128,15 +127,15 @@ at 1 MiB.
 
 | Operation | `string` | `ImmStr` | `FlexStr` |
 |---|---:|---:|---:|
-| Insert 8 bytes in the middle of 64 KiB, as a new version | 19957.2 ns | n/a | 2017.6 ns |
-| Insert 8 bytes in the middle of 1 MiB, as a new version | 303.1 µs | n/a | 2691.7 ns |
-| Slice half of a 1 MiB value | 280.7 µs | 6694.4 ns | 622.9 ns |
+| Insert 8 bytes at a random offset in 64 KiB, as a new version | 18627.6 ns | n/a | 2008.8 ns |
+| Insert 8 bytes at a random offset in 1 MiB, as a new version | 257.8 µs | n/a | 2752.5 ns |
+| Slice half of a 1 MiB value | 285.5 µs | 6897.5 ns | 628.8 ns |
 
 Keeping the original means `string` must copy before inserting. `FlexStr`
-builds the new version from the old one's pieces in O(log n): 110× faster
-at 1 MiB. Slicing `FlexStr` shares the leaves. Slicing `ImmStr` copies the
-selected bytes with `copyMem`. In this run Nim's `string` slice (`s[a .. b]`)
-copied far more slowly than that, about 2 GB/s.
+shares the prefix and suffix with the old version. At 1 MiB, copying and
+editing the flat string took 94× as long. Slicing `FlexStr` shares the
+leaves. Slicing `ImmStr` copies the selected bytes with `copyMem`. In this
+run Nim's `string` slice copied 1.8 GB/s.
 
 ### Keeping every version
 
@@ -145,22 +144,22 @@ versions (as an undo history would).
 
 | | `seq[string]` | `seq[FlexStr]` |
 |---|---:|---:|
-| Time per edit | 2560.8 ns | 309.2 ns |
+| Time per edit | 2444.9 ns | 279.3 ns |
 | Memory held by all versions | 66.5 MiB | 1.8 MiB |
 
 A one-byte replacement copies the edited leaf and the path leading to it.
 The other leaves are shared with the previous version. This reduced time
-per edit from 3.55 µs with erase followed by insert to 0.31 µs in the
+per edit from 3.55 µs with erase followed by insert to 0.28 µs in the
 same benchmark. The timed loop includes maintaining the version history.
 
 ### Converting
 
 | Operation, 64 KiB | Time |
 |---|---:|
-| `toImmStr(string)` | 576.6 ns |
-| `$ImmStr` | 933.8 ns |
-| `toFlexStr(string)` | 132.6 µs |
-| `$FlexStr` | 8108.8 ns |
+| `toImmStr(string)` | 618.7 ns |
+| `$ImmStr` | 951.9 ns |
+| `toFlexStr(string)` | 131.8 µs |
+| `$FlexStr` | 8073.5 ns |
 
 `ImmStr` converts in each direction with one allocation and `copyMem`.
 `FlexStr` allocates a node per 32 bytes when built (2,048 leaves for
