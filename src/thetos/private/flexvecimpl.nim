@@ -246,6 +246,20 @@ proc first*[T](v: FlexVec[T]): lent T =
 proc last*[T](v: FlexVec[T]): lent T =
   v[v.size - 1]
 
+proc get*[T](v: FlexVec[T], i: int): Option[T] =
+  ## Element `i`, or `none` when `i` is out of range (including negative).
+  if i >= 0 and i < v.len:
+    some(v[i])
+  else:
+    none(T)
+
+proc getOrDefault*[T](v: FlexVec[T], i: int, def: T = default(T)): T =
+  ## Element `i`, or `def` when `i` is out of range (including negative).
+  if i >= 0 and i < v.len:
+    v[i]
+  else:
+    def
+
 proc newPath[T](level: int, node: FlexPtr[T]): FlexPtr[T] =
   if level == 0:
     return node

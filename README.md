@@ -60,6 +60,11 @@ transient and rvalue optimizations automatically: filling a map in a loop
 with `[]=` (or `m = m.put(...)`) costs about the same as a mutable table.
 Once a version is shared, its nodes are path-copied.
 
+Lookups that can fail have non-raising versions: `get` returns an
+`Option` and `getOrDefault` a fallback value, for map keys
+(`m.get(key)`), vector indices (`v.get(i)`, where an out-of-range or
+negative index gives `none`) and boxes (`b.get()` on an empty box).
+
 Every `update` that takes a function also has an `updateIt` template that
 takes an expression of `it` instead, like `mapIt` in `std/sequtils`:
 `m.updateIt("hits", it + 1)`, `v.updateIt(2, it * 10)`,
@@ -181,8 +186,9 @@ assert sum == 2 + 6
 ```
 
 API: `initTrieVec`, `toTrieVec`, `len`, `high`, `low`, `[]` (also `^i`),
-`first`, `last`, `[]=`, `add`, `pop`, `pushBack`, `popBack`, `put`,
-`update`, `updateIt`, `take`, `&`, `items`, `pairs`, `==`, `hash`, `$`.
+`first`, `last`, `get`, `getOrDefault`, `[]=`, `add`, `pop`, `pushBack`,
+`popBack`, `put`, `update`, `updateIt`, `take`, `&`, `items`, `pairs`, `==`,
+`hash`, `$`.
 
 ## FlexVec
 
@@ -249,7 +255,8 @@ assert a[].limits.len == 3 and c[].limits.len == 4
 assert default(Box[int]).isEmpty           # `[]` on an empty box raises
 ```
 
-API: `box`, `[]`, `update`, `updateIt`, `isEmpty`, `==`, `hash`, `$`.
+API: `box`, `[]`, `get`, `getOrDefault`, `update`, `updateIt`, `isEmpty`,
+`==`, `hash`, `$`.
 
 ## Atom
 

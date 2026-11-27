@@ -15,7 +15,7 @@ runnableExamples:
   assert v.len == 3 and w.len == 4
   assert v[0] == 10 and w[0] == 1
 
-import std/[hashes]
+import std/[hashes, options]
 import ./private/core
 
 type RcCount = DefaultRc

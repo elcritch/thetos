@@ -1,4 +1,4 @@
-import std/unittest
+import std/[unittest, options]
 when defined(thetosTestLocal):
   import thetos/local # the same tests, against the thread-local variants
 else:
@@ -38,3 +38,11 @@ suite "Box updateIt":
     check a[] == @[1, 2, 3] and b[] == @[1, 2, 3, 4]
     expect ValueError:
       discard default(Box[int]).updateIt(it + 1)
+
+suite "Box get":
+  test "get and getOrDefault do not raise":
+    check box("x").get() == some("x")
+    check default(Box[string]).get().isNone
+    check box(3).getOrDefault() == 3
+    check default(Box[int]).getOrDefault() == 0
+    check default(Box[int]).getOrDefault(9) == 9

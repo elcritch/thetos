@@ -46,6 +46,17 @@ proc `[]`*[T](b: Box[T]): lent T =
     raise newException(ValueError, "empty Box")
   b.node.value
 
+proc get*[T](b: Box[T]): Option[T] =
+  ## The boxed value, or `none` for an empty box.
+  if b.isEmpty:
+    none(T)
+  else:
+    some(b[])
+
+proc getOrDefault*[T](b: Box[T], def: T = default(T)): T =
+  ## The boxed value, or `def` for an empty box.
+  if b.isEmpty: def else: b[]
+
 proc update*[T, F](b: sink Box[T], f: F): Box[T] =
   ## Returns a box holding `f(b[])`. Reuses the allocation when `b` is
   ## uniquely owned.

@@ -154,6 +154,20 @@ proc first*[T](v: TrieVec[T]): lent T =
 proc last*[T](v: TrieVec[T]): lent T =
   v[v.size - 1]
 
+proc get*[T](v: TrieVec[T], i: int): Option[T] =
+  ## Element `i`, or `none` when `i` is out of range (including negative).
+  if i >= 0 and i < v.len:
+    some(v[i])
+  else:
+    none(T)
+
+proc getOrDefault*[T](v: TrieVec[T], i: int, def: T = default(T)): T =
+  ## Element `i`, or `def` when `i` is out of range (including negative).
+  if i >= 0 and i < v.len:
+    v[i]
+  else:
+    def
+
 proc newPath[T](level: int, node: VecPtr[T]): VecPtr[T] =
   if level == 0:
     return node

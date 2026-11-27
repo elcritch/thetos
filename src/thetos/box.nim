@@ -14,7 +14,7 @@ runnableExamples:
   assert a[] == @[1, 2, 3]
   assert b[] == @[1, 2, 3, 4]
 
-import std/[hashes]
+import std/[hashes, options]
 import ./private/core
 
 type RcCount = DefaultRc
