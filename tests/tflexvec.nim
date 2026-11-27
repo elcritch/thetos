@@ -129,6 +129,29 @@ suite "FlexVec":
         inc seen
     check seen == 2100
 
+  test "one-byte elements use wider leaves across tree levels":
+    var model = newSeq[byte](128 * 65 + 1)
+    for i in 0 ..< model.len:
+      model[i] = byte((i xor (i shr 7)) and 255)
+    let v = toFlexVec(model)
+    let stats = v.checkInvariants()
+    check stats.leaves == 65 and stats.depth == 3 and stats.relaxed == 0
+    check v.agrees(model)
+
+    var seen = 0
+    for (_, n) in v.chunks:
+      check n == min(128, model.len - seen)
+      seen += n
+    check seen == model.len
+
+    let left = v.take(4205)
+    let right = v.drop(4011)
+    check (left & right).agrees(model[0 ..< 4205] & model[4011 .. ^1])
+    var edited = left
+    edited.add [byte(255), byte(0)]
+    check edited.agrees(model[0 ..< 4205] & @[byte(255), byte(0)])
+    check edited.pop() == 0 and left.len == 4205
+
   test "appending past high(int) preserves shared vectors":
     checkNoLeaks:
       var v = toFlexVec([1])
@@ -154,6 +177,16 @@ suite "FlexVec":
       check almostFull.len == high(int) - 1 and almostFull.last == 1
       expect IndexDefect:
         discard v[0 .. high(int)]
+
+  test "wide leaves support indexing near high(int)":
+    checkNoLeaks:
+      var v = toFlexVec([byte(3), byte(7)])
+      for i in 0 ..< sizeof(int) * 8 - 3:
+        v.add(v)
+      let full = v & v.take(v.len - 1)
+      check full.len == high(int)
+      check full[v.len - 1] == 7 and full[v.len] == 3
+      check full[high(int) - 2] == 7 and full[^1] == 3
 
   test "deep trees from repeated concatenation":
     var v = rangeVec(0, 37)

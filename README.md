@@ -201,7 +201,8 @@ API: `initTrieVec`, `toTrieVec`, `len`, `high`, `low`, `[]` (also `^i`),
 `FlexVec[T]` is a relaxed radix-balanced (RRB) tree, after
 `immer::flex_vector`. It has the whole `TrieVec` API, and concatenation,
 slicing, `drop`, `insert`, `erase` and `pushFront` are O(log n) and share
-structure with their inputs.
+structure with their inputs. Leaves hold up to 128 trivially copyable one-byte
+elements or up to 32 elements of other types.
 
 ```nim
 import thetos
@@ -273,10 +274,11 @@ API: `toImmStr`, `len`, `[]` (also `^i` and slices), `isEmpty`,
 ## FlexStr
 
 `FlexStr` is a persistent string: a rope of bytes on the same
-relaxed radix-balanced tree as `FlexVec`. Concatenation, slicing,
-`insert`, `erase` and `replace` are O(log n) and share structure with
-their inputs, and every old version stays valid. That suits text that is
-edited often and needs history, like an editor buffer with undo.
+relaxed radix-balanced tree as `FlexVec`, with up to 128 bytes per leaf.
+Concatenation, slicing, `insert`, `erase` and `replace` are O(log n) and
+share structure with their inputs, and every old version stays valid. That
+suits text that is edited often and needs history, like an editor buffer
+with undo.
 
 ```nim
 import thetos

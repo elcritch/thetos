@@ -3,6 +3,8 @@
 ##
 ## `FlexVec[T]` is a relaxed radix balanced (RRB) tree: a 32-way trie whose
 ## inner nodes may carry a size table, plus a tail buffer like `TrieVec`.
+## Leaves hold up to 128 trivially copyable one-byte elements or up to 32
+## elements of other types.
 ## Nodes built by appends stay regular and are indexed by radix, so indexing,
 ## `[]=` and `add` cost about the same as on `TrieVec`. Concatenation,
 ## `drop`, `take`, slicing, `insert`, `erase` and `pushFront` are

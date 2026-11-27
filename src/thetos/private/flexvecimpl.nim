@@ -1,11 +1,21 @@
 # Included by the container modules and by `thetos/local`; not a module.
-# The including module imports `std/[bitops, hashes, options]` and
+# The including module imports `std/[hashes, options, typetraits]` and
 # `private/core`, and declares `RcCount`, the type of each node's `rc`.
 
 const
   flexBits = 5
   flexWidth = 1 shl flexBits
   extraSteps = 2 ## extra nodes a concatenation may leave per level (RRB e_max)
+
+template leafBits(T: typedesc): int =
+  when sizeof(T) == 1 and supportsCopyMem(T): 7 else: flexBits
+
+template leafWidth(T: typedesc): int =
+  1 shl leafBits(T)
+
+template childShift(T: typedesc, level: int): int =
+  ## Inner levels advance by flexBits. The lowest level indexes full leaves.
+  level + (leafBits(T) - flexBits)
 
 type
   FlexNode[T] = object
@@ -20,9 +30,9 @@ type
     ## Immutable, structurally shared vector with O(log n) concatenation
     ## and slicing.
     size: int
-    shift: int ## level of `root`: 0 when `root` is a leaf
+    shift: int ## level of `root` in steps of flexBits, 0 for a leaf
     root: FlexPtr[T] ## tree holding all but the tail, or nil
-    tail: FlexPtr[T] ## leaf holding the last 1..32 elements, nil when empty
+    tail: FlexPtr[T] ## leaf holding the final elements, nil when empty
 
 # Inner nodes: header | children: array[32, ptr] | sizes: array[32, int].
 # `sizes[k]` is the number of elements in children 0..k; it is only
@@ -43,7 +53,7 @@ proc allocFlexLeaf[T](): FlexPtr[T] =
   static:
     doAssert alignof(T) <= 16, "element alignment above 16 is unsupported"
   result = cast[FlexPtr[T]](allocRaw(
-    alignUp(sizeof(FlexNode[T]), alignof(T)) + flexWidth * sizeof(T)
+    alignUp(sizeof(FlexNode[T]), alignof(T)) + leafWidth(T) * sizeof(T)
   ))
   initRc(result)
   result.leaf = true
@@ -74,7 +84,7 @@ proc subtreeSize[T](n: FlexPtr[T], shift: int): int =
   while s > 0:
     if n.relaxed:
       return result + n.sizeArr[n.count - 1]
-    result += (n.count - 1) shl s
+    result += (n.count - 1) shl childShift(T, s)
     n = n.childArr[n.count - 1]
     s -= flexBits
   result + n.count
@@ -83,23 +93,24 @@ proc childStart[T](n: FlexPtr[T], s, j: int): int {.inline.} =
   if n.relaxed:
     (if j == 0: 0 else: n.sizeArr[j - 1])
   else:
-    j shl s
+    j shl childShift(T, s)
 
 proc childSize[T](n: FlexPtr[T], s, j: int): int =
   if n.relaxed:
     n.sizeArr[j] - childStart(n, s, j)
   elif j < n.count - 1:
-    1 shl s
+    1 shl childShift(T, s)
   else:
     subtreeSize(n.childArr[j], s - flexBits)
 
 proc findChild[T](n: FlexPtr[T], s, idx: int): (int, int) {.inline.} =
   ## Child of the inner node `n` (level `s`) holding element `idx`, and the
   ## element's index inside that child.
+  let bits = childShift(T, s)
   if n.relaxed:
     let sizes = n.sizeArr
-    # Children hold at most `1 shl s` elements, so this guess is a lower bound.
-    var j = idx shr s
+    # Children hold at most `1 shl bits` elements, so this guess is a lower bound.
+    var j = idx shr bits
     while sizes[j] <= idx:
       inc j
     (
@@ -110,7 +121,7 @@ proc findChild[T](n: FlexPtr[T], s, idx: int): (int, int) {.inline.} =
         idx - sizes[j - 1],
     )
   else:
-    (idx shr s, idx and ((1 shl s) - 1))
+    (idx shr bits, idx and ((1 shl bits) - 1))
 
 proc finishInner[T](n: FlexPtr[T], s: int) =
   ## Fills the size table of a freshly built inner node and marks it regular
@@ -119,7 +130,7 @@ proc finishInner[T](n: FlexPtr[T], s: int) =
   var regular = true
   for k in 0 ..< n.count:
     let size = subtreeSize(n.childArr[k], s - flexBits)
-    if k < n.count - 1 and size != 1 shl s:
+    if k < n.count - 1 and size != 1 shl childShift(T, s):
       regular = false
     total += size
     n.sizeArr[k] = total
@@ -290,7 +301,7 @@ proc pushLeafRec[T](slot: var FlexPtr[T], s: int, leaf: FlexPtr[T], leafSize: in
       n.sizeArr[last] += leafSize
   else:
     # Radix indexing needs every child but the last to be full.
-    if not n.relaxed and childSize(n, s, last) != 1 shl s:
+    if not n.relaxed and childSize(n, s, last) != 1 shl childShift(T, s):
       relax(n, s)
     n.childArr[n.count] = newPath(s - flexBits, leaf)
     if n.relaxed:
@@ -335,7 +346,7 @@ proc add*[T](v: var FlexVec[T], x: sink T) =
     raiseFlexOverflow()
   if v.tail == nil:
     v.tail = allocFlexLeaf[T]()
-  elif v.tail.count < flexWidth:
+  elif v.tail.count < leafWidth(T):
     ensureOwned(v.tail)
   else:
     pushLeaf(v.root, v.shift, v.tail)
@@ -353,8 +364,8 @@ proc add*[T](v: var FlexVec[T], xs: openArray[T]) =
     # Plain data: fill the tail a leaf at a time.
     var i = 0
     while i < xs.len:
-      if v.tail != nil and v.tail.count < flexWidth and isUnique(v.tail):
-        let k = min(flexWidth - v.tail.count, xs.len - i)
+      if v.tail != nil and v.tail.count < leafWidth(T) and isUnique(v.tail):
+        let k = min(leafWidth(T) - v.tail.count, xs.len - i)
         copyMem(addr v.tail.elemArr[v.tail.count], unsafeAddr xs[i], k * sizeof(T))
         v.tail.count += k
         v.size += k
@@ -514,16 +525,21 @@ proc executePlan[T](all: seq[FlexPtr[T]], level: int): seq[FlexPtr[T]] =
     plan[i] = n.count
     total += n.count
   var n = all.len
-  let optimal = (total + flexWidth - 1) div flexWidth
+  let width =
+    if level == 0:
+      leafWidth(T)
+    else:
+      flexWidth
+  let optimal = (total + width - 1) div width
   var i = 0
   while n > optimal + extraSteps:
-    while i + 1 < n and plan[i] > flexWidth - extraSteps div 2:
+    while i + 1 < n and plan[i] > width - extraSteps div 2:
       inc i
     if i + 1 >= n:
       break
     var remaining = plan[i]
     while remaining > 0:
-      let size = min(remaining + plan[i + 1], flexWidth)
+      let size = min(remaining + plan[i + 1], width)
       plan[i] = size
       remaining = remaining + plan[i + 1] - size
       inc i
@@ -610,7 +626,7 @@ proc concatSub[T](left: FlexPtr[T], ls: int, right: FlexPtr[T], rs: int): FlexPt
     result = rebalance[T](nil, c, right, rs)
   elif ls == 0:
     var merged: FlexPtr[T]
-    if left.count + right.count <= flexWidth:
+    if left.count + right.count <= leafWidth(T):
       merged = clone(left, left.count)
       defer:
         release(merged)
@@ -833,9 +849,10 @@ proc nextLeaf[T](c: var LeafCursor[T]): FlexPtr[T] {.inline.} =
   c.tail = nil
 
 iterator chunks*[T](v: FlexVec[T]): (ptr UncheckedArray[T], int) =
-  ## Low-level: the elements in order, as contiguous runs of up to 32
-  ## (one leaf each), given as a read-only pointer and a length. Retain
-  ## the iterated version if a pointer is used after iteration.
+  ## Low-level: the elements in order, as contiguous runs of up to 128 for
+  ## trivially copyable one-byte elements and up to 32 otherwise. Each run
+  ## is one leaf, given as a read-only pointer and a length. Retain the
+  ## iterated version if a pointer is used after iteration.
   let keep = `=dup`(v)
   var c: LeafCursor[T]
   var leaf = c.firstLeaf(keep)
@@ -932,7 +949,12 @@ when defined(thetosDebug):
   proc checkNode[T](n: FlexPtr[T], s: int, stats: var FlexStats): int =
     doAssert n != nil, "nil node"
     doAssert refCount(n) >= 1, "dead node"
-    doAssert n.count in 1 .. flexWidth, "bad slot count " & $n.count
+    let width =
+      if s == 0:
+        leafWidth(T)
+      else:
+        flexWidth
+    doAssert n.count in 1 .. width, "bad slot count " & $n.count
     inc stats.nodes
     if s == 0:
       doAssert n.leaf, "inner node at leaf level"
@@ -943,11 +965,11 @@ when defined(thetosDebug):
       inc stats.relaxed
     for k in 0 ..< n.count:
       let size = checkNode(n.childArr[k], s - flexBits, stats)
-      doAssert size <= 1 shl s, "child larger than its level allows"
+      doAssert size <= 1 shl childShift(T, s), "child larger than its level allows"
       if n.relaxed:
         doAssert n.sizeArr[k] == result + size, "stale size table"
       elif k < n.count - 1:
-        doAssert size == 1 shl s, "regular node with a non-full child"
+        doAssert size == 1 shl childShift(T, s), "regular node with a non-full child"
       result += size
 
   proc checkInvariants*[T](v: FlexVec[T]): FlexStats =
@@ -957,7 +979,7 @@ when defined(thetosDebug):
       doAssert v.root == nil and v.tail == nil, "empty vector holds nodes"
       return
     doAssert v.tail != nil and v.tail.leaf, "missing tail"
-    doAssert v.tail.count in 1 .. flexWidth, "bad tail count"
+    doAssert v.tail.count in 1 .. leafWidth(T), "bad tail count"
     let off = v.size - v.tail.count
     if v.root == nil:
       doAssert off == 0 and v.shift == 0, "tree size without a tree"
