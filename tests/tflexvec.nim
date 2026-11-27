@@ -1,12 +1,34 @@
 ## FlexVec tests. Built with `-d:thetosDebug` (for `checkInvariants`) and
 ## `-d:thetosTrackAllocs` (for leak checks); see tflexvec.nims.
+## tflexdeque.nim includes this file to run the same tests on `FlexDeque`.
 
 import std/[unittest, random, hashes, options]
-when defined(thetosTestLocal):
+when not declared(testDeque):
+  const testDeque = false
+when testDeque:
+  # `FlexVec` below names `FlexDeque`; see the aliases after the imports.
+  when defined(thetosTestLocal):
+    import thetos/local except FlexVec, toFlexVec, initFlexVec
+  else:
+    import thetos/trievec
+    import thetos/flexvec except FlexVec, toFlexVec, initFlexVec
+elif defined(thetosTestLocal):
   import thetos/local # the same tests, against the thread-local variants
 else:
   import thetos/[flexvec, trievec]
 import ./fixtures/falliblecopy
+
+when testDeque:
+  type FlexVec[T] = FlexDeque[T]
+
+  proc initFlexVec[T](): FlexVec[T] =
+    initFlexDeque[T]()
+
+  proc toFlexVec[T](xs: openArray[T]): FlexVec[T] =
+    toFlexDeque(xs)
+
+  proc toFlexVec[T](t: TrieVec[T]): FlexVec[T] =
+    toFlexDeque(t)
 
 proc toSeq[T](v: FlexVec[T]): seq[T] =
   for x in v:
@@ -487,3 +509,41 @@ suite "FlexVec get":
     let v = toFlexVec([missing, addr fallback])
     check v.get(0).isNone and v.get(1).get == addr fallback
     check v.getOrDefault(0, addr fallback) == nil
+
+when not testDeque:
+  suite "FlexVec and FlexDeque together":
+    test "conversions share nodes and keep the elements":
+      checkNoLeaks:
+        let v = rangeVec(0, 2000)
+        let d = toFlexDeque(v)
+        check sizeof(FlexDeque[int]) == sizeof(FlexVec[int]) + sizeof(pointer)
+        check d.len == 2000 and d == v and v == d
+        var front = d
+        for i in 1 .. 100:
+          front = front.pushFront(-i)
+        let back = toFlexVec(front)
+        discard back.checkInvariants()
+        check back.len == 2100 and back[0] == -100 and back[100] == 0
+        check back == front and front.drop(100) == v
+        check toFlexVec(initFlexDeque[int]()).len == 0
+        check toFlexDeque(toTrieVec([1, 2])) == toFlexVec([1, 2])
+
+    test "concatenation mixes the two types":
+      checkNoLeaks:
+        var d = toFlexDeque([3, 4])
+        for i in countdown(2, 0):
+          d = d.pushFront(i)
+        let v = rangeVec(5, 600)
+        let dv = d & v
+        let vd = v & d
+        check dv is FlexDeque[int] and vd is FlexVec[int]
+        check dv == rangeVec(0, 600)
+        check vd == rangeVec(5, 600) & toFlexVec([0, 1, 2, 3, 4])
+        discard dv.checkInvariants()
+        discard vd.checkInvariants()
+        var empty: FlexVec[int]
+        empty.add(d)
+        check empty == d and empty is FlexVec[int]
+        var emptyDeque: FlexDeque[int]
+        emptyDeque.add(v)
+        check emptyDeque == v

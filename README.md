@@ -18,6 +18,7 @@ versions can be handed between threads with no locks, under `--mm:arc`,
 | `TrieSet[T]`    | `immer::set`               | CHAMP hash trie                             |
 | `TrieVec[T]`    | `immer::vector`            | 32-way radix-balanced tree with tail        |
 | `FlexVec[T]`    | `immer::flex_vector`       | relaxed radix-balanced (RRB) tree with tail |
+| `FlexDeque[T]`  | (no equivalent)            | `FlexVec` with a head buffer too            |
 | `Box[T]`        | `immer::box`               | refcounted immutable value                  |
 | `ImmStr`        | (no equivalent)            | immutable string, O(1) copies               |
 | `FlexStr`       | `immer::flex_vector<char>` | persistent string (rope) on an RRB tree     |
@@ -200,9 +201,8 @@ API: `initTrieVec`, `toTrieVec`, `len`, `high`, `low`, `[]` (also `^i`),
 
 `FlexVec[T]` is a relaxed radix-balanced (RRB) tree, after
 `immer::flex_vector`. It has the whole `TrieVec` API, and concatenation,
-slicing, `drop`, `insert` and `erase` are O(log n) and share structure with
-their inputs. A head buffer, like the tail, makes `pushFront` and repeated
-small `drop`s amortized O(1). Leaves hold up to 128 trivially copyable
+slicing, `drop`, `insert`, `erase` and `pushFront` are O(log n) and share
+structure with their inputs. Leaves hold up to 128 trivially copyable
 one-byte elements or up to 32 elements of other types.
 
 ```nim
@@ -236,6 +236,25 @@ operations.
 
 API: everything `TrieVec` has, plus `drop`, `[a .. b]`, `add` of another
 `FlexVec`, `pushFront`, `insert`, `erase`, and `toFlexVec` from a `TrieVec`.
+
+### FlexDeque
+
+`FlexDeque[T]` is a `FlexVec` that also keeps its first elements in a head
+buffer outside the tree, like the tail. `pushFront` and repeated small
+`drop`s become amortized O(1) (about 40 ns and 65 ns, against 600 ns and
+250 ns on a 100,000-element `FlexVec`). In exchange a value is one word
+larger, and indexing, `[]=`, concatenation, `insert` and `erase` cost a few
+percent more. It has the same API, and `&`, `add` and `==` accept the two
+types mixed.
+
+```nim
+var queue = toFlexDeque([3, 4])
+queue = queue.pushFront(2).pushFront(1)   # amortized O(1)
+assert queue == toFlexVec([1, 2, 3, 4])
+queue = queue.drop(1)                     # cheap while it stays in the head
+let flat: FlexVec[int] = toFlexVec(queue) # O(log n); toFlexDeque is O(1)
+assert flat.len == 3
+```
 
 ## ImmStr
 

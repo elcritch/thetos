@@ -5,7 +5,8 @@
 ## * `TrieSet[T] <thetos/trieset.html>`_: CHAMP hash set
 ## * `TrieVec[T] <thetos/trievec.html>`_: radix-balanced vector
 ## * `FlexVec[T] <thetos/flexvec.html>`_: relaxed radix-balanced vector with
-##   O(log n) concatenation and slicing
+##   O(log n) concatenation and slicing, and `FlexDeque[T]`, the same with
+##   amortized O(1) `pushFront`
 ## * `Box[T] <thetos/box.html>`_: shared immutable value
 ## * `ImmStr <thetos/immstr.html>`_: immutable string with O(1) copies
 ## * `FlexStr <thetos/flexstr.html>`_: persistent string (rope) with

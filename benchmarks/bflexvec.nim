@@ -1,5 +1,5 @@
 ## Benchmarks: FlexVec iteration, comparison, concatenation and edits at
-## the front.
+## the front, and FlexDeque for the edits where the two differ.
 ##
 ## Run with:
 ##   nim r -d:danger benchmarks/bflexvec.nim
@@ -175,6 +175,53 @@ for n in sizes:
   bench("pushFront repeated, unique, from empty to " & $n, reps * n):
     for r in 0 ..< reps:
       var v: FlexVec[int]
+      for k in 0 ..< n:
+        v = v.pushFront(k)
+      sink0 += v.len
+
+section("FlexDeque: the same operations with a head leaf")
+for n in sizes:
+  # Same inputs and loops as the FlexVec rows above.
+  let a = toFlexDeque(regular(n))
+  let b = toFlexDeque(relaxed(n))
+  let reps = 1_000_000 div n
+  const N = 20_000
+  const M = 10_000_000
+  var idx = newSeq[int](4096)
+  for k in 0 ..< idx.len:
+    idx[k] = next(n)
+  bench("deque: v[i] random, regular, " & $n, M):
+    for k in 0 ..< M:
+      sink0 += a[idx[k and 4095]]
+  bench("deque: v[i] = x random, unique, " & $n, M div 10):
+    var v = a
+    for k in 0 ..< M div 10:
+      v[idx[k and 4095]] = k
+    sink0 += v[0]
+  bench("deque: a & b, " & $n & " + " & $n, N):
+    for k in 0 ..< N:
+      sink0 += (a & b).len
+  bench("deque: insert middle, persistent, " & $n, N):
+    for k in 0 ..< N:
+      sink0 += a.insert(n div 2, k).len
+  bench("deque: erase middle, persistent, " & $n, N):
+    for k in 0 ..< N:
+      sink0 += a.erase(n div 2).len
+  bench("deque: drop(1), persistent, " & $n, N):
+    for k in 0 ..< N:
+      sink0 += a.drop(1).len
+  bench("deque: drop(1) repeated, unique, half of " & $n, reps * (n div 2)):
+    for r in 0 ..< reps:
+      var v = a
+      for k in 0 ..< n div 2:
+        v = v.drop(1)
+      sink0 += v.len
+  bench("deque: pushFront, persistent, " & $n, N):
+    for k in 0 ..< N:
+      sink0 += a.pushFront(k).len
+  bench("deque: pushFront repeated, unique, from empty to " & $n, reps * n):
+    for r in 0 ..< reps:
+      var v: FlexDeque[int]
       for k in 0 ..< n:
         v = v.pushFront(k)
       sink0 += v.len

@@ -179,11 +179,13 @@ suite "JSON conversion hooks":
       strings: toTrieVec([toImmStr("text")]),
       rope: toFlexStr("rope"),
       list: toFlexVec([1, 2, 3]),
+      deque: toFlexDeque([0, 1]).pushFront(-1),
       flags: toTrieSet([2, 7]),
       payload: parseJsonValue("""{"data":true}"""),
     )
     let node = stdJsonUtils.toJson(original)
     check $node["strings"] == """["text"]""" and $node["rope"] == """"rope""""
+    check $node["deque"] == "[-1,0,1]"
     check stdJsonUtils.jsonTo(node, typeof(original)) == original
 
   test "persistent maps use objects for strings and pairs for other keys":
@@ -216,13 +218,14 @@ suite "JSON conversion hooks":
       map: local.toTrieMap([(local.toImmStr("a"), local.toFlexStr("b"))]),
       vec: local.toTrieVec([1, 2]),
       flex: local.toFlexVec([3]),
+      deque: local.toFlexDeque([5]),
       flags: local.toTrieSet([4]),
       item: local.box(local.toImmStr("box")),
     )
     let node = persistent.toJson(original)
     check node ==
       parseJsonValue(
-        """{"map":{"a":"b"},"vec":[1,2],"flex":[3],
+        """{"map":{"a":"b"},"vec":[1,2],"flex":[3],"deque":[5],
       "flags":[4],"item":["box"]}"""
       )
     let decoded = node.jsonTo(typeof(original))
