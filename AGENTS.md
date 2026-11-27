@@ -3,13 +3,15 @@
 ## Project Structure & Modules
 - `src/`: Library modules. Keep the root module named after the package.
 - `tests/`: Unit tests using Nim's `unittest`; test files should start with `t`.
-- Root files: `immemorial.nimble` for package metadata, `config.nims` for common compiler switches, and `README.md` for usage.
+- Root files: `thetos.nimble` for package metadata, `config.nims` for common compiler switches, and `README.md` for usage.
 
 ## Build, Test, And Development
 - Install deps with Atlas: `atlas install`.
 - Do not use Nimble for dependency resolution in normal development; use Atlas and its generated `deps/` folder and `nim.cfg`.
 - Run all tests: `nim test`.
-- Run one test: `nim r tests/tnim_repo.nim`.
+- Run one test: `nim r tests/ttriemap.nim`.
+- Run every memory manager (arc, orc, atomicArc): `nim testAll`.
+- Run container tests with plain refcounts: `nim testSingleThread`.
 
 ## Coding Style & Naming
 - Indentation: 2 spaces; no tabs.
