@@ -1,0 +1,309 @@
+## FlexVec tests. Built with `-d:thetosDebug` (for `checkInvariants`) and
+## `-d:thetosTrackAllocs` (for leak checks); see tflexvec.nims.
+
+import std/[unittest, random, hashes]
+import thetos/[flexvec, trievec, box]
+import thetos/private/core
+
+template checkNoLeaks(body: untyped) =
+  let before = liveAllocations()
+  block:
+    body
+  check liveAllocations() == before
+
+proc toSeq[T](v: FlexVec[T]): seq[T] =
+  for x in v:
+    result.add x
+
+proc agrees[T](v: FlexVec[T], model: seq[T]): bool =
+  discard v.checkInvariants()
+  if v.len != model.len:
+    return false
+  var i = 0
+  for x in v:
+    if x != model[i]:
+      return false
+    inc i
+  for j in 0 ..< model.len:
+    if v[j] != model[j]:
+      return false
+  true
+
+proc rangeVec(a, b: int): FlexVec[int] =
+  for i in a ..< b:
+    result.add i
+
+suite "FlexVec":
+  test "empty vector":
+    let v = initFlexVec[int]()
+    check v.len == 0
+    check v == default(FlexVec[int])
+    check $v == "[]"
+    check toSeq(v).len == 0
+    expect IndexDefect:
+      discard v[0]
+    var w = v
+    expect IndexDefect:
+      discard w.pop()
+    check (v & v).len == 0
+    check v.take(3).len == 0
+    check v.drop(3).len == 0
+    check v[0 .. -1].len == 0
+    discard v.checkInvariants()
+
+  test "basic API":
+    var v = toFlexVec([1, 2, 3])
+    let w = v.pushBack(4)
+    v[0] = 10
+    check v == toFlexVec([10, 2, 3])
+    check w == toFlexVec([1, 2, 3, 4])
+    check v[^1] == 3 and v.first == 10 and v.last == 3
+    check v.high == 2 and v.low == 0
+    check $v == "[10, 2, 3]"
+    check v.put(1, 7)[1] == 7 and v[1] == 2
+    check v.update(
+      2,
+      proc(x: int): int =
+        x * 2,
+    )[2] == 6
+    check v.popBack() == toFlexVec([10, 2])
+    check v.pop() == 3 and v.len == 2
+    var pairs: seq[(int, int)]
+    for p in w.pairs:
+      pairs.add p
+    check pairs == @[(0, 1), (1, 2), (2, 3), (3, 4)]
+    check hash(toFlexVec([1, 2])) == hash(toFlexVec([1, 2]))
+    check toFlexVec(["a"]) & toFlexVec(["b"]) == toFlexVec(["a", "b"])
+
+  test "flex operations":
+    let v = rangeVec(0, 100)
+    check toSeq(v.drop(30)) == toSeq(rangeVec(30, 100))
+    check toSeq(v.take(30)) == toSeq(rangeVec(0, 30))
+    check toSeq(v[10 .. 19]) == toSeq(rangeVec(10, 20))
+    check toSeq(v[^10 .. ^1]) == toSeq(rangeVec(90, 100))
+    check v.pushFront(-1)[0] == -1 and v.pushFront(-1).len == 101
+    check toSeq(v.insert(50, -5))[49 .. 51] == @[49, -5, 50]
+    check v.insert(100, -5)[100] == -5
+    check toSeq(v.erase(0))[0] == 1 and v.erase(99).len == 99
+    expect IndexDefect:
+      discard v.insert(101, 0)
+    expect IndexDefect:
+      discard v.erase(100)
+    expect IndexDefect:
+      discard v[5 .. 100]
+    var u = v
+    u.add(v)
+    check toSeq(u) == toSeq(v) & toSeq(v)
+    u.add(u) # aliasing
+    check u.len == 400 and u[399] == 99
+    discard u.checkInvariants()
+
+  test "converts from TrieVec":
+    let t = toTrieVec([1, 2, 3, 4])
+    check toFlexVec(t) == toFlexVec([1, 2, 3, 4])
+    var big: TrieVec[int]
+    for i in 0 ..< 5000:
+      big.add i
+    let f = toFlexVec(big)
+    check f.len == 5000 and f[4999] == 4999
+    check f.checkInvariants().relaxed == 0
+
+  test "appends stay regular":
+    var v: FlexVec[int]
+    for i in 0 ..< 40_000:
+      v.add i
+    let stats = v.checkInvariants()
+    check stats.relaxed == 0
+    # 39,968 elements in the tree need four levels (32^3 = 32,768).
+    check stats.depth == 4
+    for i in countdown(39_999, 0):
+      check v.pop() == i
+      if i mod 997 == 0:
+        discard v.checkInvariants()
+    check v.len == 0
+
+  test "deep trees from repeated concatenation":
+    var v = rangeVec(0, 37)
+    var model = toSeq(v)
+    while v.len < 1_500_000:
+      v = v & v.drop(3)
+      model = model & model[3 .. ^1]
+    let stats = v.checkInvariants()
+    check stats.depth >= 4
+    check v.len == model.len
+    var r = initRand(5)
+    for _ in 0 ..< 2000:
+      let i = r.rand(v.high)
+      check v[i] == model[i]
+    for _ in 0 ..< 40:
+      let a = r.rand(v.high)
+      let b = r.rand(a .. v.high)
+      let s = v[a .. b]
+      discard s.checkInvariants()
+      check s.len == b - a + 1
+      check s[0] == model[a] and s[^1] == model[b]
+      let joined = v.take(a) & s & v.drop(b + 1)
+      discard joined.checkInvariants()
+      check joined.len == v.len
+      for _ in 0 ..< 20:
+        let i = r.rand(joined.high)
+        check joined[i] == model[i]
+
+  test "random operations agree with seq and snapshots stay frozen":
+    checkNoLeaks:
+      for seed in 1 .. 12:
+        var r = initRand(seed)
+        var v: FlexVec[int]
+        var model: seq[int]
+        var snaps: seq[(FlexVec[int], seq[int])]
+        for step in 0 ..< 1200:
+          let x = r.rand(1_000_000)
+          case r.rand(12)
+          of 0, 1:
+            for _ in 0 ..< r.rand(1 .. 80):
+              v.add x
+              model.add x
+          of 2:
+            if v.len > 0:
+              check v.pop() == model.pop()
+          of 3:
+            if v.len > 0:
+              let i = r.rand(v.high)
+              v[i] = x
+              model[i] = x
+          of 4:
+            let n = r.rand(v.len)
+            v = v.take(n)
+            model.setLen(n)
+          of 5:
+            let n = r.rand(v.len)
+            v = v.drop(n)
+            model = model[n .. ^1]
+          of 6:
+            # Concatenate a piece of a snapshot or of itself.
+            let (src, srcModel) =
+              if snaps.len > 0 and r.rand(1) == 0:
+                snaps[r.rand(snaps.high)]
+              else:
+                (v, model)
+            if src.len > 0:
+              let a = r.rand(src.high)
+              let b = r.rand(a .. src.high)
+              v.add(src[a .. b])
+              model.add srcModel[a .. b]
+          of 7:
+            let i = r.rand(v.len)
+            v = v.insert(i, x)
+            model.insert(x, i)
+          of 8:
+            if v.len > 0:
+              let i = r.rand(v.high)
+              v = v.erase(i)
+              model.delete(i)
+          of 9:
+            v = v.pushFront(x)
+            model.insert(x, 0)
+          of 10:
+            if v.len > 0:
+              let a = r.rand(v.high)
+              let b = r.rand(a .. v.high)
+              v = v[a .. b]
+              model = model[a .. b]
+          else:
+            if v.len < 20_000:
+              v.add(v)
+              model.add model
+          if v.len > 30_000:
+            v = v.take(5_000)
+            model.setLen(5_000)
+          if step mod 7 == 0:
+            snaps.add (v, model)
+          if step mod 25 == 0:
+            check agrees(v, model)
+          else:
+            discard v.checkInvariants()
+            check v.len == model.len
+            if v.len > 0:
+              let i = r.rand(v.high)
+              check v[i] == model[i]
+        check agrees(v, model)
+        for (s, m) in snaps:
+          check agrees(s, m)
+
+  test "strings are copied and destroyed":
+    checkNoLeaks:
+      var v: FlexVec[string]
+      for i in 0 ..< 3000:
+        v.add $i
+      let w = v[100 .. 2900] & v.drop(2000)
+      check w[0] == "100" and w[^1] == "2999"
+      var u = w.insert(5, "x").erase(0)
+      u[3] = "y"
+      check u[3] == "y" and w[4] == "104"
+
+  test "nested containers":
+    checkNoLeaks:
+      var v: FlexVec[FlexVec[int]]
+      for i in 0 ..< 200:
+        v.add rangeVec(0, i)
+      let w = v & v.drop(50)
+      check w[250][9] == 9
+      check w.len == 350
+
+type FallibleCopy = object
+  value: Box[int]
+
+var copiesBeforeFailure = -1
+
+proc `=copy`(dst: var FallibleCopy, src: FallibleCopy) =
+  dst.value = src.value
+  if copiesBeforeFailure == 0:
+    raise newException(ValueError, "copy failed")
+  if copiesBeforeFailure > 0:
+    dec copiesBeforeFailure
+
+proc `==`(a, b: FallibleCopy): bool =
+  a.value[] == b.value[]
+
+proc fallible(n: int, offset = 0): FlexVec[FallibleCopy] =
+  for i in 0 ..< n:
+    result.add FallibleCopy(value: box(offset + i))
+
+# With -d:thetosSingleThread, a raising copy leaks one element in TrieVec
+# too (tleaks does not run in that mode), so this suite is skipped there.
+when not defined(thetosSingleThread):
+  suite "FlexVec exception safety":
+    # Like TrieVec, only `add`, `[]=` and appending a vector are safe against
+    # element copies that raise. The functional operations (`insert`, `take`,
+    # ...) leak the tree, and `pop` on a shared tail leaks the copied element,
+    # because Nim does not destroy `result` when a copy into it raises.
+    test "failing copies leave vectors unchanged and leak nothing":
+      checkNoLeaks:
+        var failures = 0
+        for budget in 0 ..< 120:
+          var v = fallible(700)
+          v = v.drop(13) # relaxed left edge
+          let snapshot = v
+          let other = fallible(45, 1000).drop(7)
+          let ops = [
+            proc(v: var FlexVec[FallibleCopy]) =
+              v.add(other),
+            proc(v: var FlexVec[FallibleCopy]) =
+              v.add(FallibleCopy(value: box(-1))),
+            proc(v: var FlexVec[FallibleCopy]) =
+              v[400] = FallibleCopy(value: box(-2)),
+            proc(v: var FlexVec[FallibleCopy]) =
+              v[v.high] = FallibleCopy(value: box(-3)),
+          ]
+          for op in ops:
+            var w = v
+            copiesBeforeFailure = budget
+            try:
+              op(w)
+            except ValueError:
+              inc failures
+              check w == snapshot
+            copiesBeforeFailure = -1
+            discard w.checkInvariants()
+          check v == snapshot
+        check failures > 0

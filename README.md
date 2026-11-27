@@ -12,13 +12,14 @@ except the changed path, and every older version stays valid. Nodes use
 versions can be handed between threads with no locks, under `--mm:arc`,
 `--mm:orc` or `--mm:atomicArc`.
 
-| thetos          | immer           | Structure                              |
-|-----------------|-----------------|----------------------------------------|
-| `TrieMap[K, V]` | `immer::map`    | CHAMP hash trie, 32-way, 64-bit hashes |
-| `TrieSet[T]`    | `immer::set`    | CHAMP hash trie                        |
-| `TrieVec[T]`    | `immer::vector` | 32-way radix-balanced tree with tail   |
-| `Box[T]`        | `immer::box`    | refcounted immutable value             |
-| `Atom[T]`       | `immer::atom`   | lock-free cell to publish new versions |
+| thetos          | immer                | Structure                                   |
+|-----------------|----------------------|---------------------------------------------|
+| `TrieMap[K, V]` | `immer::map`         | CHAMP hash trie, 32-way, 64-bit hashes      |
+| `TrieSet[T]`    | `immer::set`         | CHAMP hash trie                             |
+| `TrieVec[T]`    | `immer::vector`      | 32-way radix-balanced tree with tail        |
+| `FlexVec[T]`    | `immer::flex_vector` | relaxed radix-balanced (RRB) tree with tail |
+| `Box[T]`        | `immer::box`         | refcounted immutable value                  |
+| `Atom[T]`       | `immer::atom`        | lock-free cell to publish new versions      |
 
 ## Example
 
@@ -81,6 +82,12 @@ Once a version is shared, its nodes are path-copied.
 * `TrieVec`: `initTrieVec`, `toTrieVec`, `len`, `[]` (also `^i`), `first`,
   `last`, `[]=`, `add`, `pop`, `pushBack`, `popBack`, `put`, `update`,
   `take`, `&`, `items`, `pairs`, `==`, `hash`, `$`.
+* `FlexVec`: everything `TrieVec` has, plus O(log n) `drop`, slicing
+  (`v[a .. b]`), concatenation (`&`, and `add` of another `FlexVec`),
+  `pushFront`, `insert` and `erase`. `toFlexVec(trieVec)` copies in O(n).
+  Indexing a vector built by appends costs about the same as `TrieVec`;
+  after concatenations it goes through per-node size tables and is a few
+  times slower.
 * `Box`: `box`, `[]`, `update`, `isEmpty`, `==`, `hash`, `$`.
 * `Atom`: `initAtom`, `load`, `store`, `exchange`, `update` (CAS loop).
   Atoms are locations and cannot be copied. Keep them in globals or in

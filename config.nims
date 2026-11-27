@@ -11,7 +11,7 @@ proc testFiles(): seq[string] =
 
 # Suites that do not need threads or Atom, rerun with -d:thetosSingleThread.
 const singleThreadTests = ["tests/ttriemap.nim", "tests/ttrieset.nim", "tests/ttrievec.nim",
-  "tests/tbox.nim"]
+  "tests/tflexvec.nim", "tests/tbox.nim"]
 
 task test, "run unit tests":
   for testFile in testFiles():
