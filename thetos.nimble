@@ -1,4 +1,4 @@
-version       = "0.2.0"
+version       = "0.3.0"
 author        = "Jaremy Creechley"
 description   = "Persistent immutable data structures (map, set, vector, box, atom) with lock-free sharing between threads"
 license       = "BSD-3"

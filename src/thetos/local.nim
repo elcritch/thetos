@@ -28,7 +28,7 @@ runnableExamples:
   assert scratch.len == 4 and shared.len == 3
   assert scratch[0] == shared[0]
 
-import std/[bitops, hashes, options]
+import std/[bitops, hashes, macros, options]
 import ./private/core
 export DiffKind
 
