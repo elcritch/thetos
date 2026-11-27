@@ -334,17 +334,12 @@ keeps thetos values on one thread.
 
 ## Known limitations
 
-* If an element's `=copy` hook raises, the in-place vector operations
-  (`add`, `[]=`) leave the vector unchanged and leak nothing. The
-  functional operations (`put`, `pushBack`, `take`, `insert`, ...) leak the
-  tree they were building, and `pop` on a shared vector leaks the copied
-  element. Nim does not destroy a proc's `result`, or a local about to be
-  moved into it, when the proc raises. With `-d:thetosSingleThread`, the
-  in-place operations also leak the one element. Copy hooks that never
-  raise are not affected.
-* With Nim 2.2.10, two of those in-place cases (`TrieVec` updates and
-  `Atom.update`) also leak when a copy raises. 2.2.12 does not, and CI uses
-  2.2.12.
+* If an element's `=copy` hook raises during `add(openArray)`, elements
+  already appended remain in the vector. Both `TrieVec` and `FlexVec`
+  release partially copied elements and temporary nodes when a copy raises,
+  including with `-d:thetosSingleThread`.
+* thetos requires Nim 2.2.12 or later. Nim 2.2.10 can leak allocations when
+  a copy raises during a vector update or `Atom.update`.
 
 ## Development
 

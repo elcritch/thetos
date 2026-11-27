@@ -4,5 +4,5 @@ description   = "Persistent immutable data structures (map, set, vector, box, at
 license       = "MIT"
 srcDir        = "src"
 
-requires "nim >= 2.0.0"
+requires "nim >= 2.2.12"
 

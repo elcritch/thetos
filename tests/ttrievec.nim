@@ -1,5 +1,6 @@
 import std/[unittest, random]
 import thetos/trievec
+import ./fixtures/falliblecopy
 
 type Counted = object ## Element that counts how often it is copied.
   id: int
@@ -121,3 +122,6 @@ suite "TrieVec":
       check b.pop() == @[i]
     check a.len == 100
     check a[99] == @[99]
+
+suite "TrieVec exception safety":
+  vectorCopyTests(toTrieVec)

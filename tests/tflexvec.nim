@@ -2,14 +2,8 @@
 ## `-d:thetosTrackAllocs` (for leak checks); see tflexvec.nims.
 
 import std/[unittest, random, hashes]
-import thetos/[flexvec, trievec, box]
-import thetos/private/core
-
-template checkNoLeaks(body: untyped) =
-  let before = liveAllocations()
-  block:
-    body
-  check liveAllocations() == before
+import thetos/[flexvec, trievec]
+import ./fixtures/falliblecopy
 
 proc toSeq[T](v: FlexVec[T]): seq[T] =
   for x in v:
@@ -212,7 +206,7 @@ suite "FlexVec":
           else:
             if v.len < 20_000:
               v.add(v)
-              model.add model
+              model = model & model
           if v.len > 30_000:
             v = v.take(5_000)
             model.setLen(5_000)
@@ -250,60 +244,69 @@ suite "FlexVec":
       check w[250][9] == 9
       check w.len == 350
 
-type FallibleCopy = object
-  value: Box[int]
-
-var copiesBeforeFailure = -1
-
-proc `=copy`(dst: var FallibleCopy, src: FallibleCopy) =
-  dst.value = src.value
-  if copiesBeforeFailure == 0:
-    raise newException(ValueError, "copy failed")
-  if copiesBeforeFailure > 0:
-    dec copiesBeforeFailure
-
-proc `==`(a, b: FallibleCopy): bool =
-  a.value[] == b.value[]
-
 proc fallible(n: int, offset = 0): FlexVec[FallibleCopy] =
   for i in 0 ..< n:
-    result.add FallibleCopy(value: box(offset + i))
+    result.add fallibleValue(offset + i)
 
-# With -d:thetosSingleThread, a raising copy leaks one element in TrieVec
-# too (tleaks does not run in that mode), so this suite is skipped there.
-when not defined(thetosSingleThread):
-  suite "FlexVec exception safety":
-    # Like TrieVec, only `add`, `[]=` and appending a vector are safe against
-    # element copies that raise. The functional operations (`insert`, `take`,
-    # ...) leak the tree, and `pop` on a shared tail leaks the copied element,
-    # because Nim does not destroy `result` when a copy into it raises.
-    test "failing copies leave vectors unchanged and leak nothing":
-      checkNoLeaks:
-        var failures = 0
-        for budget in 0 ..< 120:
-          var v = fallible(700)
-          v = v.drop(13) # relaxed left edge
-          let snapshot = v
-          let other = fallible(45, 1000).drop(7)
-          let ops = [
-            proc(v: var FlexVec[FallibleCopy]) =
-              v.add(other),
-            proc(v: var FlexVec[FallibleCopy]) =
-              v.add(FallibleCopy(value: box(-1))),
-            proc(v: var FlexVec[FallibleCopy]) =
-              v[400] = FallibleCopy(value: box(-2)),
-            proc(v: var FlexVec[FallibleCopy]) =
-              v[v.high] = FallibleCopy(value: box(-3)),
-          ]
-          for op in ops:
-            var w = v
-            copiesBeforeFailure = budget
-            try:
-              op(w)
-            except ValueError:
-              inc failures
-              check w == snapshot
-            copiesBeforeFailure = -1
-            discard w.checkInvariants()
-          check v == snapshot
-        check failures > 0
+suite "FlexVec exception safety":
+  vectorCopyTests(toFlexVec)
+
+  test "failed short concatenation preserves the destination":
+    checkNoLeaks:
+      var v = fallible(3)
+      let source = v
+      let other = fallible(3, 10)
+      expectCopyFailure(1):
+        v.add(other)
+      check v == source
+      expectCopyFailure(1):
+        discard source.pushFront(fallibleValue(-1))
+      check source.len == 3
+
+  test "failed slicing, insertion and conversion release their allocations":
+    checkNoLeaks:
+      let source = fallible(35)
+      let trie = toTrieVec([fallibleValue(1), fallibleValue(2), fallibleValue(3)])
+      expectCopyFailure(1):
+        discard source.drop(1)
+      expectCopyFailure(1):
+        discard source[1 .. 3]
+      expectCopyFailure(1):
+        discard source.insert(1, fallibleValue(-1))
+      expectCopyFailure(1):
+        discard source.erase(1)
+      expectCopyFailure(1):
+        discard toFlexVec(trie)
+      check source.len == 35
+      check trie.len == 3
+
+  test "failing copies leave vectors unchanged and leak nothing":
+    checkNoLeaks:
+      var failures = 0
+      for budget in 0 ..< 120:
+        var v = fallible(700)
+        v = v.drop(13) # relaxed left edge
+        let snapshot = v
+        let other = fallible(45, 1000).drop(7)
+        let ops = [
+          proc(v: var FlexVec[FallibleCopy]) =
+            v.add(other),
+          proc(v: var FlexVec[FallibleCopy]) =
+            v.add(fallibleValue(-1)),
+          proc(v: var FlexVec[FallibleCopy]) =
+            v[400] = fallibleValue(-2),
+          proc(v: var FlexVec[FallibleCopy]) =
+            v[v.high] = fallibleValue(-3),
+        ]
+        for op in ops:
+          var w = v
+          copiesBeforeFailure = budget
+          try:
+            op(w)
+          except ValueError:
+            inc failures
+            check w == snapshot
+          copiesBeforeFailure = -1
+          discard w.checkInvariants()
+        check v == snapshot
+      check failures > 0

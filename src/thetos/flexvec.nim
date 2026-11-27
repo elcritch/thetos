@@ -352,7 +352,7 @@ proc add*[T](v: var FlexVec[T], x: sink T) =
 
 proc add*[T](v: var FlexVec[T], xs: openArray[T]) =
   for x in xs:
-    v.add(x)
+    appendCopy(v, x)
 
 proc assocRec[T](slot: var FlexPtr[T], s, idx: int, value: var T) =
   ensureOwned(slot)
@@ -521,21 +521,20 @@ proc executePlan[T](all: seq[FlexPtr[T]], level: int): seq[FlexPtr[T]] =
     dec i
   plan.setLen(n)
 
-  var done = false
+  var nodes: seq[FlexPtr[T]]
   defer:
-    if not done:
-      for node in result:
-        release(node)
+    for node in nodes:
+      release(node)
   var idx = 0
   var offset = 0
   for target in plan:
     if offset == 0 and all[idx].count == target:
       retain(all[idx])
-      result.add all[idx]
+      nodes.add all[idx]
       inc idx
       continue
     let node = (if level == 0: allocLeaf[T]() else: allocInner[T]())
-    result.add node
+    nodes.add node
     var filled = 0
     while filled < target:
       let src = all[idx]
@@ -557,7 +556,7 @@ proc executePlan[T](all: seq[FlexPtr[T]], level: int): seq[FlexPtr[T]] =
         offset = 0
     if level > 0:
       finishInner(node, level)
-  done = true
+  result = move(nodes)
 
 proc rebalance[T](left, center, right: FlexPtr[T], s: int): FlexPtr[T] =
   ## Merges the children of `left` (all but its last), of `center` (owned,
@@ -645,7 +644,7 @@ proc add*[T](v: var FlexVec[T], w: FlexVec[T]) =
     # leaves `v` unchanged.
     var res = v
     for k in 0 ..< keep.tail.count:
-      res.add(keep.tail.elemArr[k])
+      appendCopy(res, keep.tail.elemArr[k])
     v = move(res)
     return
   # Build the left tree (`v` with its tail pushed in) without touching `v`.
@@ -665,73 +664,68 @@ proc add*[T](v: var FlexVec[T], w: FlexVec[T]) =
   v.tail = keep.tail
   v.size += keep.size
 
-# The functional operations below build their result in a local. As with
-# `TrieVec`, only the in-place operations (`add`, `[]=`, `pop`) are safe
-# against element copies that raise: Nim skips destroying a local whose last
-# use moves it into `result`, so a raising copy here leaks the tree.
-
 proc `&`*[T](a: sink FlexVec[T], b: FlexVec[T]): FlexVec[T] =
   ## Concatenation in O(log n).
-  var r = a
-  r.add(b)
-  r
+  result = a
+  resetOnError(result):
+    result.add(b)
 
 proc pop*[T](v: var FlexVec[T]): T =
   ## Removes and returns the last element.
   if v.size == 0:
     raiseIndex(0, 0)
   let c = v.tail.count
-  if isUnique(v.tail):
-    result = move(v.tail.elemArr[c - 1])
-  else:
-    result = v.tail.elemArr[c - 1]
-  truncate(v, v.size - 1)
+  resetOnError(result):
+    if isUnique(v.tail):
+      result = move(v.tail.elemArr[c - 1])
+    else:
+      result = v.tail.elemArr[c - 1]
+    truncate(v, v.size - 1)
 
 proc pushBack*[T](v: sink FlexVec[T], x: sink T): FlexVec[T] =
   ## Returns a vector with `x` appended.
-  var r = v
-  r.add(x)
-  r
+  result = v
+  resetOnCopyError(T, result):
+    result.add(x)
 
 proc pushFront*[T](v: sink FlexVec[T], x: sink T): FlexVec[T] =
   ## Returns a vector with `x` prepended, in O(log n).
-  var r: FlexVec[T]
-  r.add(x)
-  r.add(v)
-  r
+  resetOnError(result):
+    result.add(x)
+    result.add(v)
 
 proc popBack*[T](v: sink FlexVec[T]): FlexVec[T] =
   ## Returns a vector without its last element.
   if v.size == 0:
     raiseIndex(0, 0)
-  var r = v
-  truncate(r, r.size - 1)
-  r
+  result = v
+  resetOnCopyError(T, result):
+    truncate(result, result.size - 1)
 
 proc put*[T](v: sink FlexVec[T], i: Natural, x: sink T): FlexVec[T] =
   ## Returns a vector with element `i` replaced by `x`.
-  var r = v
-  r[i] = x
-  r
+  result = v
+  resetOnError(result):
+    result[i] = x
 
 proc update*[T, F](v: sink FlexVec[T], i: Natural, f: F): FlexVec[T] =
   ## Returns a vector with element `i` replaced by `f(v[i])`.
-  var r = v
-  let next = f(r[i])
-  r[i] = next
-  r
+  result = v
+  resetOnError(result):
+    let next = f(result[i])
+    result[i] = next
 
 proc take*[T](v: sink FlexVec[T], n: Natural): FlexVec[T] =
   ## Returns the first `n` elements, in O(log n).
-  var r = v
-  truncate(r, n)
-  r
+  result = v
+  resetOnError(result):
+    truncate(result, n)
 
 proc drop*[T](v: sink FlexVec[T], n: Natural): FlexVec[T] =
   ## Returns all but the first `n` elements, in O(log n).
-  var r = v
-  dropFront(r, n)
-  r
+  result = v
+  resetOnError(result):
+    dropFront(result, n)
 
 proc `[]`*[T; U, V: Ordinal](v: FlexVec[T], s: HSlice[U, V]): FlexVec[T] =
   ## Returns elements `s.a .. s.b` (`^i` indices allowed), in O(log n).
@@ -744,37 +738,41 @@ proc `[]`*[T; U, V: Ordinal](v: FlexVec[T], s: HSlice[U, V]): FlexVec[T] =
     raiseIndex(a, v.size)
   if b >= v.size:
     raiseIndex(b, v.size)
-  var r = v
-  dropFront(r, a)
-  truncate(r, count)
-  r
+  result = v
+  resetOnError(result):
+    dropFront(result, a)
+    truncate(result, count)
 
 proc insert*[T](v: sink FlexVec[T], i: Natural, x: sink T): FlexVec[T] =
   ## Returns a vector with `x` inserted before element `i` (`i == len`
   ## appends), in O(log n).
-  if i > v.size:
-    raiseIndex(i, v.size + 1)
-  var right = v
-  dropFront(right, i)
-  var r = v
-  truncate(r, i)
-  r.add(x)
-  r.add(right)
-  r
+  result = v
+  resetOnError(result):
+    var value = x
+    resetOnError(value):
+      if i > result.size:
+        raiseIndex(i, result.size + 1)
+      var right = result
+      resetOnError(right):
+        dropFront(right, i)
+        truncate(result, i)
+        result.add(move(value))
+        result.add(right)
 
 proc erase*[T](v: sink FlexVec[T], i: Natural): FlexVec[T] =
   ## Returns a vector without element `i`, in O(log n).
-  checkIndex(v, i)
-  var right = v
-  dropFront(right, i + 1)
-  var r = v
-  truncate(r, i)
-  r.add(right)
-  r
+  result = v
+  resetOnError(result):
+    checkIndex(result, i)
+    var right = result
+    resetOnError(right):
+      dropFront(right, i + 1)
+      truncate(result, i)
+      result.add(right)
 
 proc toFlexVec*[T](xs: openArray[T]): FlexVec[T] =
-  for x in xs:
-    result.add(x)
+  resetOnError(result):
+    result.add(xs)
 
 iterator items*[T](v: FlexVec[T]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned
@@ -798,8 +796,9 @@ iterator pairs*[T](v: FlexVec[T]): (int, T) =
 proc toFlexVec*[T](v: TrieVec[T]): FlexVec[T] =
   ## Copies the elements of a `TrieVec` in O(n). The two types use
   ## different node layouts, so no structure is shared.
-  for x in v:
-    result.add(x)
+  resetOnError(result):
+    for x in v:
+      appendCopy(result, x)
 
 proc `==`*[T](a, b: FlexVec[T]): bool =
   if a.size != b.size:

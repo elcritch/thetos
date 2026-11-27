@@ -5,7 +5,7 @@
 ## use plain integer operations instead, which is faster but makes it unsafe
 ## to share any thetos value between threads.
 
-import std/[atomics, hashes]
+import std/[atomics, hashes, typetraits]
 
 when defined(thetosTrackAllocs):
   var liveAllocs: Atomic[int]
@@ -87,12 +87,14 @@ else:
 
   proc retain*[N](n: ptr N) {.inline.} =
     ## Adds an owner. The caller must already own a reference.
-    inc plainRc(n)
+    plainRc(n) = plainRc(n) +% 1
 
   proc dropRef*[N](n: ptr N): bool {.inline.} =
     ## Drops an owner. Returns true when the caller was the last owner and
     ## must free the node.
-    dec plainRc(n)
+    # Checked arithmetic can make generated cleanup return early while an
+    # exception is pending. Match the atomic operations' wrapping arithmetic.
+    plainRc(n) = plainRc(n) -% 1
     plainRc(n) == 0
 
   proc isUnique*[N](n: ptr N): bool {.inline.} =
@@ -110,3 +112,35 @@ proc mixHash*(h: Hash): uint64 {.inline.} =
 proc keyHash*[K](key: K): uint64 {.inline.} =
   mixin hash
   mixHash(hash(key))
+
+template resetOnError*(value, body: untyped) =
+  ## A raising copy can leave an owned value behind even when Nim omits
+  ## its implicit destruction. Handle cleanup before propagating the error.
+  when supportsCopyMem(typeof(value)):
+    body
+  else:
+    try:
+      body
+    except Exception:
+      reset(value)
+      raise
+
+template resetOnCopyError*(T: typedesc, value, body: untyped) =
+  ## Use when only an element copy can fail while owning allocations.
+  when supportsCopyMem(T):
+    body
+  else:
+    resetOnError(value):
+      body
+
+proc appendCopy*[V, T](v: var V, x: T) {.inline.} =
+  mixin add
+  when supportsCopyMem(T):
+    v.add(x)
+  else:
+    # An implicit `=dup` for the sink argument can strand a partial copy in
+    # its result. Copy into a local whose cleanup is under our control.
+    var value: T
+    resetOnError(value):
+      value = x
+    v.add(move(value))

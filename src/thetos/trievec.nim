@@ -224,7 +224,7 @@ proc add*[T](v: var TrieVec[T], x: sink T) =
 
 proc add*[T](v: var TrieVec[T], xs: openArray[T]) =
   for x in xs:
-    v.add(x)
+    appendCopy(v, x)
 
 proc assocRec[T](slot: var VecPtr[T], level, i: int, value: var T) =
   ensureOwned(slot)
@@ -270,71 +270,77 @@ proc pop*[T](v: var TrieVec[T]): T =
   ## Removes and returns the last element.
   if v.size == 0:
     raiseIndex(0, 0)
-  let tcount = v.size - tailOffset(v.size)
-  if tcount > 1 or v.size == 1:
+  resetOnError(result):
+    let tcount = v.size - tailOffset(v.size)
+    if tcount > 1 or v.size == 1:
+      if isUnique(v.tail):
+        result = move(v.tail.elemArr[tcount - 1])
+        dec v.tail.count
+      else:
+        result = v.tail.elemArr[tcount - 1]
+        let t = clone(v.tail, tcount - 1)
+        release(v.tail)
+        v.tail = t
+      if v.size == 1:
+        release(v.tail)
+        v.tail = nil
+      dec v.size
+      return
+    # The tail holds one element: the last tree leaf becomes the new tail.
     if isUnique(v.tail):
-      result = move(v.tail.elemArr[tcount - 1])
-      dec v.tail.count
+      result = move(v.tail.elemArr[0])
     else:
-      result = v.tail.elemArr[tcount - 1]
-      let t = clone(v.tail, tcount - 1)
-      release(v.tail)
-      v.tail = t
-    if v.size == 1:
-      release(v.tail)
-      v.tail = nil
+      result = v.tail.elemArr[0]
+    release(v.tail)
+    let newTail = v.leafFor(v.size - 2)
+    retain(newTail)
+    popTail(v.root, v.shift, v.size)
+    if v.root == nil:
+      v.shift = 0
+    elif v.shift > vecBits and v.root.count == 1:
+      let child = v.root.childArr[0]
+      retain(child)
+      release(v.root)
+      v.root = child
+      v.shift -= vecBits
+    v.tail = newTail
     dec v.size
-    return
-  # The tail holds one element: the last tree leaf becomes the new tail.
-  if isUnique(v.tail):
-    result = move(v.tail.elemArr[0])
-  else:
-    result = v.tail.elemArr[0]
-  release(v.tail)
-  let newTail = v.leafFor(v.size - 2)
-  retain(newTail)
-  popTail(v.root, v.shift, v.size)
-  if v.root == nil:
-    v.shift = 0
-  elif v.shift > vecBits and v.root.count == 1:
-    let child = v.root.childArr[0]
-    retain(child)
-    release(v.root)
-    v.root = child
-    v.shift -= vecBits
-  v.tail = newTail
-  dec v.size
 
 proc pushBack*[T](v: sink TrieVec[T], x: sink T): TrieVec[T] =
   ## Returns a vector with `x` appended.
   result = v
-  result.add(x)
+  resetOnCopyError(T, result):
+    result.add(x)
 
 proc popBack*[T](v: sink TrieVec[T]): TrieVec[T] =
   ## Returns a vector without its last element.
   result = v
-  discard result.pop()
+  resetOnCopyError(T, result):
+    discard result.pop()
 
 proc put*[T](v: sink TrieVec[T], i: Natural, x: sink T): TrieVec[T] =
   ## Returns a vector with element `i` replaced by `x`.
   result = v
-  result[i] = x
+  resetOnError(result):
+    result[i] = x
 
 proc update*[T, F](v: sink TrieVec[T], i: Natural, f: F): TrieVec[T] =
   ## Returns a vector with element `i` replaced by `f(v[i])`.
   result = v
-  let next = f(result[i])
-  result[i] = next
+  resetOnError(result):
+    let next = f(result[i])
+    result[i] = next
 
 proc take*[T](v: sink TrieVec[T], n: Natural): TrieVec[T] =
   ## Returns the first `n` elements.
   result = v
-  while result.size > n:
-    discard result.pop()
+  resetOnError(result):
+    while result.size > n:
+      discard result.pop()
 
 proc toTrieVec*[T](xs: openArray[T]): TrieVec[T] =
-  for x in xs:
-    result.add(x)
+  resetOnError(result):
+    result.add(xs)
 
 iterator items*[T](v: TrieVec[T]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned
@@ -356,8 +362,9 @@ iterator pairs*[T](v: TrieVec[T]): (int, T) =
 
 proc `&`*[T](a: sink TrieVec[T], b: TrieVec[T]): TrieVec[T] =
   result = a
-  for x in b:
-    result.add(x)
+  resetOnError(result):
+    for x in b:
+      appendCopy(result, x)
 
 proc `==`*[T](a, b: TrieVec[T]): bool =
   if a.size != b.size:
