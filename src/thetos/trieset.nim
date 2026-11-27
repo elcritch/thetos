@@ -4,9 +4,6 @@
 ## O(1) copies, O(log32 n) updates by path copying, in-place updates when
 ## uniquely owned, and atomic reference counts so sets can be shared across
 ## threads without locks.
-##
-## If you also import `std/sets`, qualify `toTrieSet`/`initTrieSet` calls with the
-## module name, since `std/sets` keeps deprecated procs with those names.
 
 runnableExamples:
   let a = toTrieSet([1, 2, 3])
