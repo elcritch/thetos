@@ -1,7 +1,8 @@
-# String benchmarks: `string` vs `ImmStr` vs `FlexStr`
+# String benchmarks on arm64: `string` vs `ImmStr` vs `FlexStr`
 
 This compares Nim's `string` with thetos' two string types across common
 operations, to show where each one is the right choice.
+[amd64 results on FreeBSD](benchmark_std_string_amd64.md)
 
 * **`string`**: Nim's mutable string. One contiguous buffer, copied in full
   on every copy.
