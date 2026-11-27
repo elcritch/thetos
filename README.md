@@ -245,9 +245,9 @@ let c = a.with(name = "prod", retries = 5)
 assert a.name == "default" and c.name == "prod" and c.retries == 5
 
 # `update` applies a function to the whole value.
-let d = c.update(proc(cfg: Config): Config =
+let d = c.update do (cfg: Config) -> Config:
   result = cfg
-  result.limits.add 4)
+  result.limits.add 4
 assert c.limits.len == 2 and d.limits.len == 3
 
 assert default(Box[int]).isEmpty           # `[]` on an empty box raises
