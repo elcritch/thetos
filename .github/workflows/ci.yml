@@ -37,5 +37,5 @@ jobs:
       - name: Install dependencies
         run: atlas install
 
-      - name: Run tests
-        run: nim test
+      - name: Run tests (arc, orc, atomicArc; debug and release)
+        run: nim testAll
