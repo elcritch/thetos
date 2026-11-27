@@ -8,40 +8,46 @@ on:
 
 jobs:
   test:
-    name: test (${{ matrix.mm }}${{ matrix.mode && ', release' || '' }})
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.runner == 'ubuntu-24.04-arm' && 'arm64' || 'amd64' }}, ${{ matrix.mm }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
+        # arm64 has a weaker memory model than amd64, so it can expose
+        # missing acquire/release orderings that amd64 hides.
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
         mm: [arc, orc, atomicArc]
-        mode: ['', '-d:release']
     env:
+      NIM_VERSION: 2.2.12
       # --skipParentCfg keeps config.nims from forcing --mm:atomicArc.
-      NIM_ARGS: --skipParentCfg --threads:on --mm:${{ matrix.mm }} ${{ matrix.mode }}
+      # -d:release keeps runtime checks and assertions but optimizes, which is
+      # likelier to expose memory-ordering bugs. `nim testAll` also runs debug.
+      NIM_ARGS: --skipParentCfg --threads:on --mm:${{ matrix.mm }} -d:release
     steps:
       - uses: actions/checkout@v4
-
-      - uses: jiro4989/setup-nim-action@v2
-        with:
-          nim-version: '2.2.12'
 
       - name: Cache Atlas deps
         uses: actions/cache@v4
         with:
+          # `atlas env` installs Nim under deps/, so key on the architecture.
           path: deps
-          key: ${{ runner.os }}-atlas-${{ hashFiles('*.nimble') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-${{ env.NIM_VERSION }}-atlas-${{ hashFiles('*.nimble') }}
           restore-keys: |
-            ${{ runner.os }}-atlas-
-
-      - name: Add Atlas to PATH
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+            ${{ runner.os }}-${{ runner.arch }}-nim-${{ env.NIM_VERSION }}-atlas-
 
       - name: Install Atlas
         shell: bash
-        run: curl -fsSL https://raw.githubusercontent.com/nim-lang/atlas/HEAD/install.sh | bash -
-
-      - name: Check Atlas version
         run: |
+          curl -fsSL https://raw.githubusercontent.com/nim-lang/atlas/HEAD/install.sh | bash -
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+
+      - name: Install Nim
+        run: atlas env "$NIM_VERSION" --binary --github-path
+
+      - name: Check versions
+        run: |
+          uname -m
+          nim -v
           atlas -v
           atlas-run -v
 
