@@ -1063,13 +1063,16 @@ proc toFlexVec*[T](v: FlexDeque[T]): FlexVec[T] =
   d.root = nil
   d.tail = nil
 
-type LeafCursor[T] = object
+type LeafCursor[T, H] = object
   stack: array[16, tuple[node: FlexPtr[T], next: int]]
   depth: int
   tail: FlexPtr[T]
-  root: FlexPtr[T] ## tree still to walk after the head
+  when H is FlexWithHead:
+    root: FlexPtr[T] ## tree still to walk after the head
 
-proc descendLeft[T](c: var LeafCursor[T], subtree: FlexPtr[T]): FlexPtr[T] {.inline.} =
+proc descendLeft[T, H](
+    c: var LeafCursor[T, H], subtree: FlexPtr[T]
+): FlexPtr[T] {.inline.} =
   var node = subtree
   while not node.leaf:
     c.stack[c.depth] = (node, 1)
@@ -1077,19 +1080,21 @@ proc descendLeft[T](c: var LeafCursor[T], subtree: FlexPtr[T]): FlexPtr[T] {.inl
     node = node.childArr[0]
   node
 
-proc firstLeaf[T, H](c: var LeafCursor[T], v: FlexImpl[T, H]): FlexPtr[T] {.inline.} =
+proc firstLeaf[T, H](
+    c: var LeafCursor[T, H], v: FlexImpl[T, H]
+): FlexPtr[T] {.inline.} =
   # The caller owns the vector throughout the walk.
-  c.tail = v.tail
   when hasHead(H):
     if v.head != nil:
+      c.tail = v.tail
       c.root = v.root
       return v.head
   if v.root == nil:
-    c.tail = nil
     return v.tail
+  c.tail = v.tail
   c.descendLeft(v.root)
 
-proc nextLeaf[T](c: var LeafCursor[T]): FlexPtr[T] {.inline.} =
+proc nextLeaf[T, H](c: var LeafCursor[T, H]): FlexPtr[T] {.inline.} =
   while c.depth > 0:
     let top = c.depth - 1
     let (parent, next) = c.stack[top]
@@ -1097,10 +1102,11 @@ proc nextLeaf[T](c: var LeafCursor[T]): FlexPtr[T] {.inline.} =
       inc c.stack[top].next
       return c.descendLeft(parent.childArr[next])
     dec c.depth
-  if c.root != nil:
-    let root = c.root
-    c.root = nil
-    return c.descendLeft(root)
+  when hasHead(H):
+    if c.root != nil:
+      let root = c.root
+      c.root = nil
+      return c.descendLeft(root)
   result = c.tail
   c.tail = nil
 
@@ -1110,7 +1116,7 @@ iterator chunks*[T, H](v: FlexImpl[T, H]): (ptr UncheckedArray[T], int) =
   ## is one leaf, given as a read-only pointer and a length. Retain the
   ## iterated version if a pointer is used after iteration.
   let keep = `=dup`(v)
-  var c: LeafCursor[T]
+  var c: LeafCursor[T, H]
   var leaf = c.firstLeaf(keep)
   while leaf != nil:
     yield (leaf.elemArr, leaf.count)
@@ -1118,7 +1124,7 @@ iterator chunks*[T, H](v: FlexImpl[T, H]): (ptr UncheckedArray[T], int) =
 
 iterator items*[T, H](v: FlexImpl[T, H]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned
-  var c: LeafCursor[T]
+  var c: LeafCursor[T, H]
   var leaf = c.firstLeaf(keep)
   while leaf != nil:
     for k in 0 ..< leaf.count:
@@ -1161,7 +1167,8 @@ proc `==`*[T, H, G](a: FlexImpl[T, H], b: FlexImpl[T, G]): bool =
     else:
       return true
   # Walk both trees leaf by leaf; their leaf boundaries may differ.
-  var left, right: LeafCursor[T]
+  var left: LeafCursor[T, H]
+  var right: LeafCursor[T, G]
   var x = left.firstLeaf(a)
   var y = right.firstLeaf(b)
   var i, j: int
