@@ -1,4 +1,4 @@
-version       = "0.1.0"
+version       = "0.2.0"
 author        = "Your Name"
 description   = "Persistent immutable data structures (map, set, vector, box, atom) with lock-free sharing between threads"
 license       = "MIT"
