@@ -862,16 +862,12 @@ iterator chunks*[T](v: FlexVec[T]): (ptr UncheckedArray[T], int) =
 
 iterator items*[T](v: FlexVec[T]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned
-  if keep.size > 0:
-    let off = keep.treeSize
-    var i = 0
-    while i < off:
-      let (leaf, start) = leafAt(keep.root, keep.shift, i)
-      for k in 0 ..< leaf.count:
-        yield leaf.elemArr[k]
-      i = start + leaf.count
-    for k in 0 ..< keep.tail.count:
-      yield keep.tail.elemArr[k]
+  var c: LeafCursor[T]
+  var leaf = c.firstLeaf(keep)
+  while leaf != nil:
+    for k in 0 ..< leaf.count:
+      yield leaf.elemArr[k]
+    leaf = c.nextLeaf()
 
 iterator pairs*[T](v: FlexVec[T]): (int, T) =
   var i = 0
@@ -891,19 +887,8 @@ proc `==`*[T](a, b: FlexVec[T]): bool =
     return false
   if a.root == b.root and a.tail == b.tail:
     return true
-  var i = 0
-  for x in a:
-    if not (x == b[i]):
-      return false
-    inc i
-  true
-
-proc `==`*(a, b: FlexVec[char]): bool =
-  if a.size != b.size:
-    return false
-  if a.root == b.root and a.tail == b.tail:
-    return true
-  var left, right: LeafCursor[char]
+  # Walk both trees leaf by leaf; their leaf boundaries may differ.
+  var left, right: LeafCursor[T]
   var x = left.firstLeaf(a)
   var y = right.firstLeaf(b)
   var i, j: int
@@ -911,8 +896,16 @@ proc `==`*(a, b: FlexVec[char]): bool =
     let n = min(x.count - i, y.count - j)
     let p = addr x.elemArr[i]
     let q = addr y.elemArr[j]
-    if p != q and not equalMem(p, q, n):
-      return false
+    if p != q: # a shared leaf at the same offset is equal
+      when T is char | byte | int8 | bool:
+        if not equalMem(p, q, n):
+          return false
+      else:
+        let xs = cast[ptr UncheckedArray[T]](p)
+        let ys = cast[ptr UncheckedArray[T]](q)
+        for k in 0 ..< n:
+          if not (xs[k] == ys[k]):
+            return false
     i += n
     j += n
     if i == x.count:

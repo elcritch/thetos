@@ -95,6 +95,39 @@ suite "FlexVec":
     check u.len == 400 and u[399] == 99
     discard u.checkInvariants()
 
+  test "equality across trees with different leaf boundaries":
+    var r = initRand(11)
+    proc pieces(n: int, r: var Rand): FlexVec[int] =
+      var i = 0
+      while i < n:
+        let k = min(1 + r.rand(40), n - i)
+        result = result & rangeVec(i, i + k)
+        i += k
+
+    for n in [1, 31, 32, 33, 500, 5000]:
+      let a = rangeVec(0, n)
+      let b = pieces(n, r)
+      check b.checkInvariants().relaxed > 0 or n <= 33
+      check a == b and b == a
+      check a.drop(1) == b.drop(1)
+      for i in [0, n div 2, n - 1]:
+        check a != b.put(i, -1) and b.put(i, -1) != a
+      let s = toFlexVec(["x", "y"]) & toFlexVec(["z"])
+      check s == toFlexVec(["x", "y", "z"])
+      check s != toFlexVec(["x", "y", "w"])
+      var c: FlexVec[char]
+      var model: seq[char]
+      while c.len < n:
+        var piece: FlexVec[char]
+        for k in 0 .. r.rand(150):
+          piece.add char(ord('a') + (c.len + k) mod 26)
+        c = c & piece
+      for x in c:
+        model.add x
+      check c == toFlexVec(model) and toFlexVec(model) == c
+      model[^1] = '!'
+      check c != toFlexVec(model)
+
   test "converts from TrieVec":
     let t = toTrieVec([1, 2, 3, 4])
     check toFlexVec(t) == toFlexVec([1, 2, 3, 4])
