@@ -100,9 +100,10 @@ loop is safe.
   `ref`s non-atomically.
 * `Atom` is lock-free. It uses split reference counting: the atom word packs
   the cell pointer with a count of in-flight loads (16 bits on 64-bit
-  targets, 32 on 32-bit), and every store installs a fresh cell, so pointer
-  equality has no ABA problem. `update` may call its function more than
-  once under contention.
+  targets, 32 on 32-bit). The old cell stays alive while the writer
+  accounts for any in-flight loads. Every store installs a fresh cell,
+  so pointer equality has no ABA problem. `update` may call its function
+  more than once under contention.
 * Under ORC, reference cycles that pass through an thetos container are
   not collected. Persistent values cannot form cycles on their own.
 

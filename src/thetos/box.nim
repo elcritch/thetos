@@ -28,7 +28,7 @@ type
 proc `=destroy`*[T](b: Box[T]) =
   if b.node != nil and dropRef(b.node):
     `=destroy`(b.node.value)
-    freeRaw(b.node)
+    freeAlignedRaw(b.node, alignof(BoxNode[T]))
 
 proc `=wasMoved`*[T](b: var Box[T]) =
   b.node = nil
@@ -46,7 +46,8 @@ proc `=copy`*[T](dst: var Box[T], src: Box[T]) =
 
 proc box*[T](value: sink T): Box[T] =
   ## Boxes `value`.
-  result.node = cast[ptr BoxNode[T]](allocRaw(sizeof(BoxNode[T])))
+  result.node =
+    cast[ptr BoxNode[T]](allocAlignedRaw(sizeof(BoxNode[T]), alignof(BoxNode[T])))
   result.node.rc.store(1, moRelaxed)
   result.node.value = value
 

@@ -82,18 +82,24 @@ proc release*[E](n: ChampPtr[E]) {.raises: [], gcsafe.} =
     freeRaw(n)
 
 proc clone[E](n: ChampPtr[E]): ChampPtr[E] =
-  result = allocChamp[E](int(n.nentries), int(n.nchildren))
-  result.datamap = n.datamap
-  result.nodemap = n.nodemap
+  var fresh = allocChamp[E](int(n.nentries), int(n.nchildren))
+  defer:
+    release(fresh)
+  fresh.datamap = n.datamap
+  fresh.nodemap = n.nodemap
   let src = n.entryArr
-  let dst = result.entryArr
+  let dst = fresh.entryArr
+  fresh.nentries = 0
   for i in 0 ..< int(n.nentries):
+    # Include the current slot in cleanup if a field copy fails partway.
+    inc fresh.nentries
     dst[i] = src[i]
   let sc = n.childArr
-  let dc = result.childArr
+  let dc = fresh.childArr
   for i in 0 ..< int(n.nchildren):
     dc[i] = sc[i]
     retain(sc[i])
+  result = move(fresh)
 
 proc ensureOwned[E](slot: var ChampPtr[E]) =
   if not isUnique(slot):
@@ -188,12 +194,14 @@ proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): b
         slot.entryArr[i] = e
         return false
     let steal = isUnique(n)
-    let fresh = allocChamp[E](ne + 1, 0)
+    var fresh = allocChamp[E](ne + 1, 0)
+    defer:
+      release(fresh)
     let dst = fresh.entryArr
     for i in 0 ..< ne:
       takeEntry(dst[i], es[i], steal)
     dst[ne] = e
-    replaceSlot(slot, fresh, steal)
+    replaceSlot(slot, move(fresh), steal)
     return true
 
   let bit = bitpos(h, shift)
@@ -210,32 +218,35 @@ proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): b
     let eh = keyHash(src[idx].key)
     var existing: E
     takeEntry(existing, src[idx], steal)
-    let sub = mergeTwo(existing, eh, e, h, shift + champBits)
-    let fresh = allocChamp[E](ne - 1, nc + 1)
+    var fresh = allocChamp[E](ne - 1, nc + 1)
+    defer:
+      release(fresh)
     fresh.datamap = n.datamap xor bit
     fresh.nodemap = n.nodemap or bit
+    let cidx = index(fresh.nodemap, bit)
+    let dc = fresh.childArr
+    dc[cidx] = mergeTwo(existing, eh, e, h, shift + champBits)
     let dst = fresh.entryArr
     var j = 0
     for i in 0 ..< ne:
       if i != idx:
         takeEntry(dst[j], src[i], steal)
         inc j
-    let cidx = index(fresh.nodemap, bit)
     let sc = n.childArr
-    let dc = fresh.childArr
     for i in 0 ..< cidx:
       takeChild(dc[i], sc[i], steal)
-    dc[cidx] = sub
     for i in cidx ..< nc:
       takeChild(dc[i + 1], sc[i], steal)
-    replaceSlot(slot, fresh, steal)
+    replaceSlot(slot, move(fresh), steal)
     return true
   elif (n.nodemap and bit) != 0:
     ensureOwned(slot)
     return champInsert(slot.childArr[index(slot.nodemap, bit)], shift + champBits, h, e)
   else:
     let steal = isUnique(n)
-    let fresh = allocChamp[E](ne + 1, nc)
+    var fresh = allocChamp[E](ne + 1, nc)
+    defer:
+      release(fresh)
     fresh.datamap = n.datamap or bit
     fresh.nodemap = n.nodemap
     let idx = index(fresh.datamap, bit)
@@ -250,7 +261,7 @@ proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): b
     let dc = fresh.childArr
     for i in 0 ..< nc:
       takeChild(dc[i], sc[i], steal)
-    replaceSlot(slot, fresh, steal)
+    replaceSlot(slot, move(fresh), steal)
     return true
 
 proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
@@ -266,7 +277,9 @@ proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
     while not (src[idx].key == key):
       inc idx
     let steal = isUnique(n)
-    let fresh = allocChamp[E](ne - 1, 0)
+    var fresh = allocChamp[E](ne - 1, 0)
+    defer:
+      release(fresh)
     let dst = fresh.entryArr
     var j = 0
     for i in 0 ..< ne:
@@ -275,7 +288,7 @@ proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
         inc j
     if steal:
       destroyEntry(src[idx])
-    replaceSlot(slot, fresh, steal)
+    replaceSlot(slot, move(fresh), steal)
     return
 
   let bit = bitpos(h, shift)
@@ -287,7 +300,9 @@ proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
       return
     let idx = index(n.datamap, bit)
     let steal = isUnique(n)
-    let fresh = allocChamp[E](ne - 1, nc)
+    var fresh = allocChamp[E](ne - 1, nc)
+    defer:
+      release(fresh)
     fresh.datamap = n.datamap xor bit
     fresh.nodemap = n.nodemap
     let src = n.entryArr
@@ -303,7 +318,7 @@ proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
     let dc = fresh.childArr
     for i in 0 ..< nc:
       takeChild(dc[i], sc[i], steal)
-    replaceSlot(slot, fresh, steal)
+    replaceSlot(slot, move(fresh), steal)
     return
 
   ensureOwned(slot)

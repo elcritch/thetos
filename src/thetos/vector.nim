@@ -73,18 +73,21 @@ proc release[T](n: VecPtr[T]) {.raises: [], gcsafe.} =
 proc clone[T](n: VecPtr[T], count: int): VecPtr[T] =
   ## Copies the first `count` slots of `n`.
   if n.leaf:
-    result = allocLeaf[T]()
+    var leaf = allocLeaf[T]()
+    defer:
+      release(leaf)
     let src = n.elemArr
-    let dst = result.elemArr
+    let dst = leaf.elemArr
     for i in 0 ..< count:
+      inc leaf.count
       dst[i] = src[i]
-  else:
-    result = allocInner[T]()
-    let src = n.childArr
-    let dst = result.childArr
-    for i in 0 ..< count:
-      dst[i] = src[i]
-      retain(src[i])
+    return move(leaf)
+  result = allocInner[T]()
+  let src = n.childArr
+  let dst = result.childArr
+  for i in 0 ..< count:
+    dst[i] = src[i]
+    retain(src[i])
   result.count = count
 
 proc ensureOwned[T](slot: var VecPtr[T]) =
@@ -192,6 +195,10 @@ proc pushTail[T](slot: var VecPtr[T], level, size: int, tailNode: VecPtr[T]) =
 
 proc add*[T](v: var Vector[T], x: sink T) =
   ## Appends `x` to this vector value only; other copies are not affected.
+  # Keep the incoming value owned locally while a shared leaf is copied.
+  var value = x
+  defer:
+    reset(value)
   if v.tail == nil:
     v.tail = allocLeaf[T]()
   elif v.size - tailOffset(v.size) < vecWidth:
@@ -211,7 +218,7 @@ proc add*[T](v: var Vector[T], x: sink T) =
     else:
       pushTail(v.root, v.shift, v.size, v.tail)
     v.tail = allocLeaf[T]()
-  v.tail.elemArr[v.tail.count] = x
+  v.tail.elemArr[v.tail.count] = move(value)
   inc v.tail.count
   inc v.size
 
@@ -219,22 +226,25 @@ proc add*[T](v: var Vector[T], xs: openArray[T]) =
   for x in xs:
     v.add(x)
 
-proc assocRec[T](slot: var VecPtr[T], level, i: int, x: sink T) =
+proc assocRec[T](slot: var VecPtr[T], level, i: int, value: var T) =
   ensureOwned(slot)
   if level == 0:
-    slot.elemArr[i and vecMask] = x
+    slot.elemArr[i and vecMask] = move(value)
   else:
-    assocRec(slot.childArr[(i shr level) and vecMask], level - vecBits, i, x)
+    assocRec(slot.childArr[(i shr level) and vecMask], level - vecBits, i, value)
 
 proc `[]=`*[T](v: var Vector[T], i: Natural, x: sink T) =
   ## Replaces element `i` in this vector value only.
+  var value = x
+  defer:
+    reset(value)
   checkIndex(v, i)
   let off = tailOffset(v.size)
   if i >= off:
     ensureOwned(v.tail)
-    v.tail.elemArr[i - off] = x
+    v.tail.elemArr[i - off] = move(value)
   else:
-    assocRec(v.root, v.shift, i, x)
+    assocRec(v.root, v.shift, i, value)
 
 proc popTail[T](slot: var VecPtr[T], level, size: int) =
   ## Removes the last leaf below `slot`; sets `slot` to nil if emptied.

@@ -14,8 +14,10 @@
 ## count of in-flight loads ("split reference counting"). A loader
 ## reserves the cell by bumping that count in the same CAS that reads the
 ## pointer, so the cell cannot be freed before the loader takes its own
-## reference. A writer that swaps the cell out transfers the outstanding
-## count into the cell's reference count. Cells are never reinstalled, so
+## reference. An installed cell carries a reference-count bias that keeps
+## it alive until the writer accounts for outstanding reservations. The
+## writer replaces the bias with those reservations and its own reference
+## in one atomic operation. Cells are never reinstalled, so
 ## pointer equality identifies one installation and avoids ABA.
 ##
 ## An `Atom` is a location, not a value: it cannot be copied. Keep it in a
@@ -35,7 +37,7 @@ import ./private/core
 
 type
   AtomCell[T] = object
-    rc*: Atomic[int] # exported for the generic refcount helpers in core
+    rc*: Atomic[int64] # exported for the generic refcount helpers in core
     value: T
 
   CellPtr[T] = ptr AtomCell[T]
@@ -55,6 +57,7 @@ else:
 const
   countOne = 1'u64 shl countShift
   countMax = not ptrMask
+  installedBias = 1'i64 shl (64 - countShift)
 
 template cellOf[T](w: uint64): CellPtr[T] =
   cast[CellPtr[T]](cast[uint](w and ptrMask))
@@ -62,23 +65,46 @@ template cellOf[T](w: uint64): CellPtr[T] =
 template packCell(p: pointer): uint64 =
   uint64(cast[uint](p))
 
-proc newCell[T](value: sink T): CellPtr[T] =
-  result = cast[CellPtr[T]](allocRaw(sizeof(AtomCell[T])))
-  result.rc.store(1, moRelaxed)
-  result.value = value
-  assert (packCell(result) and not ptrMask) == 0, "pointer uses the count bits"
-
 proc releaseCell[T](c: CellPtr[T]) {.raises: [], gcsafe.} =
   if c != nil and dropRef(c):
     {.cast(raises: []), cast(gcsafe).}:
       `=destroy`(c.value)
-    freeRaw(c)
+    freeAlignedRaw(c, alignof(AtomCell[T]))
+
+template makeCell(T: typedesc, payload: untyped): untyped =
+  block:
+    var cell =
+      cast[CellPtr[T]](allocAlignedRaw(sizeof(AtomCell[T]), alignof(AtomCell[T])))
+    cell.rc.store(1, moRelaxed)
+    defer:
+      releaseCell(cell)
+    cell.value = payload
+    assert (packCell(cell) and not ptrMask) == 0, "pointer uses the count bits"
+    cell.rc.store(installedBias, moRelaxed)
+    move(cell)
+
+proc newCell[T](value: sink T): CellPtr[T] =
+  makeCell(T, value)
+
+proc copyCell[T](value: T): CellPtr[T] =
+  makeCell(T, value)
+
+proc transferPending[T](cell: CellPtr[T], old: uint64) {.inline.} =
+  # Readers may already have subtracted their reservations. The bias exceeds
+  # the maximum reservation count, so those debits cannot free the cell.
+  let pending = int64(old shr countShift)
+  discard cell.rc.fetchAdd(pending + 1 - installedBias, moRelaxed)
+
+proc retireCell[T](old: uint64) =
+  let cell = cellOf[T](old)
+  if cell != nil:
+    transferPending(cell, old)
+    releaseCell(cell)
 
 proc `=destroy`*[T](a: Atom[T]) =
-  # No other thread may use an atom while it is destroyed, so any
-  # reservation count is zero and the atom owns one reference to the cell.
+  # No other thread may use an atom while it is destroyed.
   let w = cast[ptr uint64](addr a.word)[]
-  releaseCell(cellOf[T](w))
+  retireCell[T](w)
 
 proc `=copy`*[T](dst: var Atom[T], src: Atom[T]) {.error.}
 proc `=dup`*[T](src: Atom[T]): Atom[T] {.error.}
@@ -99,8 +125,8 @@ proc acquireCell[T](a: var Atom[T]): CellPtr[T] =
       break
   let cell = cellOf[T](w)
   retain(cell)
-  # Hand the reservation back, unless a writer already moved it into the
-  # cell's reference count.
+  # Return the reservation to the word while it still refers to this cell.
+  # After replacement, debit the cell even if the writer has yet to credit it.
   var cur = w + countOne
   while true:
     if cellOf[T](cur) != cell:
@@ -110,21 +136,6 @@ proc acquireCell[T](a: var Atom[T]): CellPtr[T] =
       break
   cell
 
-proc transferPending[T](cell: CellPtr[T], old: uint64) {.inline.} =
-  ## Moves the in-flight load reservations recorded in the swapped-out word
-  ## `old` into the cell's reference count.
-  let pending = int(old shr countShift)
-  if pending > 0:
-    discard cell.rc.fetchAdd(pending, moRelaxed)
-
-proc retireCell[T](old: uint64) =
-  ## Releases the atom's reference to a cell that was swapped out by a
-  ## successful exchange/CAS returning the word `old`.
-  let cell = cellOf[T](old)
-  if cell != nil:
-    transferPending(cell, old)
-    releaseCell(cell)
-
 proc initAtom*[T](value: sink T): Atom[T] =
   ## Creates an atom holding `value`.
   result.word.store(packCell(newCell(value)), moRelaxed)
@@ -133,8 +144,9 @@ proc load*[T](a: var Atom[T]): T =
   ## Returns the current value (a snapshot; O(1) for thetos containers).
   let cell = acquireCell(a)
   if cell != nil:
+    defer:
+      releaseCell(cell)
     result = cell.value
-    releaseCell(cell)
 
 proc exchange*[T](a: var Atom[T], value: sink T): T =
   ## Stores `value` and returns the previous value.
@@ -142,12 +154,13 @@ proc exchange*[T](a: var Atom[T], value: sink T): T =
   let cell = cellOf[T](old)
   if cell != nil:
     transferPending(cell, old)
+    defer:
+      releaseCell(cell)
     # Unique means no loader holds or has reserved the cell: take the value.
     if isUnique(cell):
       result = move(cell.value)
     else:
       result = cell.value
-    releaseCell(cell)
 
 proc store*[T](a: var Atom[T], value: sink T) =
   ## Replaces the value.
@@ -160,24 +173,20 @@ proc update*[T, F](a: var Atom[T], f: F): T {.discardable.} =
   ## so it should be free of side effects.
   while true:
     let cell = acquireCell(a)
+    defer:
+      releaseCell(cell)
     result =
       if cell == nil:
         f(default(T))
       else:
         f(cell.value)
     # Copy before publishing: once installed, `next` may be freed by others.
-    let next = newCell(result)
+    let next = copyCell(result)
     var expected = a.word.load(moRelaxed)
-    var swapped = false
     while cellOf[T](expected) == cell:
       if a.word.compareExchangeWeak(
         expected, packCell(next), moAcquireRelease, moRelaxed
       ):
-        swapped = true
-        break
-    if swapped:
-      retireCell[T](expected)
-      releaseCell(cell)
-      return
-    releaseCell(next)
-    releaseCell(cell)
+        retireCell[T](expected)
+        return
+    retireCell[T](packCell(next))

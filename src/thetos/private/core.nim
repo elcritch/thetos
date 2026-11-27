@@ -1,6 +1,5 @@
 ## Shared low-level helpers: raw shared allocation, atomic reference counts
-## and hash mixing. Every node type in thetos starts with an
-## `rc: Atomic[int]` field holding the number of owners (starts at 1).
+## and hash mixing. Each node has an atomic `rc` field for ownership tracking.
 
 import std/[atomics, hashes]
 
@@ -36,6 +35,24 @@ proc freeRaw*(p: pointer) {.inline.} =
 
 template alignUp*(size, align: int): int =
   (size + align - 1) and not (align - 1)
+
+proc allocAlignedRaw*(size: int, alignment: static int): pointer {.inline.} =
+  when alignment <= alignof(pointer):
+    allocRaw(size)
+  else:
+    # Keep the allocator's original pointer immediately before the aligned node.
+    let raw = allocRaw(size + sizeof(pointer) + alignment - 1)
+    let address =
+      (cast[uint](raw) + uint(sizeof(pointer) + alignment - 1)) and
+      not uint(alignment - 1)
+    cast[ptr pointer](address - uint(sizeof(pointer)))[] = raw
+    cast[pointer](address)
+
+proc freeAlignedRaw*(p: pointer, alignment: static int) {.inline.} =
+  when alignment <= alignof(pointer):
+    freeRaw(p)
+  else:
+    freeRaw(cast[ptr pointer](cast[uint](p) - uint(sizeof(pointer)))[])
 
 proc retain*[N](n: ptr N) {.inline.} =
   ## Adds an owner. The caller must already own a reference.

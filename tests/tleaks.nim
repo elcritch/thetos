@@ -14,6 +14,25 @@ proc hash(k: BadKey): Hash =
 proc `==`(a, b: BadKey): bool =
   a.id == b.id
 
+type
+  FallibleCopy = object
+    value: Box[int]
+
+  AlignedPayload {.byref.} = object
+    value {.align: 64.}: int
+
+var copiesBeforeFailure = -1
+
+proc `=copy`(dst: var FallibleCopy, src: FallibleCopy) =
+  dst.value = src.value
+  if copiesBeforeFailure == 0:
+    raise newException(ValueError, "copy failed")
+  if copiesBeforeFailure > 0:
+    dec copiesBeforeFailure
+
+proc fallibleValue(id: int): FallibleCopy =
+  FallibleCopy(value: box(id))
+
 template checkNoLeaks(body: untyped) =
   let before = liveAllocations()
   block:
@@ -65,6 +84,92 @@ suite "leaks":
       discard a.exchange(box(initMap[int, string]()))
       check a.load()[].len == 0
 
+  test "throwing atom updates release their snapshots":
+    checkNoLeaks:
+      var a = initAtom(box(1))
+      proc reject(value: Box[int]): Box[int] =
+        doAssert value[] == 1
+        raise newException(ValueError, "update failed")
+
+      expect ValueError:
+        discard a.update(reject)
+      check a.load()[] == 1
+      a.store(box(2))
+      check a.load()[] == 2
+
+  test "throwing copies release unpublished atom cells":
+    checkNoLeaks:
+      var a = initAtom(fallibleValue(1))
+      copiesBeforeFailure = 0
+      expect ValueError:
+        discard a.update(
+          proc(value: FallibleCopy): FallibleCopy =
+            fallibleValue(value.value[] + 1)
+        )
+      copiesBeforeFailure = -1
+      check a.load().value[] == 1
+
+  test "throwing copies release partial map clones":
+    checkNoLeaks:
+      var m = toMap({1: fallibleValue(1), 2: fallibleValue(2)})
+      let snapshot = m
+      copiesBeforeFailure = 1
+      expect ValueError:
+        m[1] = fallibleValue(3)
+      copiesBeforeFailure = -1
+      check m == snapshot
+      check m[1].value[] == 1
+      m[1] = fallibleValue(3)
+      check snapshot[1].value[] == 1
+
+  test "throwing copies release partial vector clones":
+    checkNoLeaks:
+      var v = toVector([fallibleValue(1), fallibleValue(2)])
+      let snapshot = v
+      copiesBeforeFailure = 1
+      expect ValueError:
+        v.add(fallibleValue(3))
+      copiesBeforeFailure = 1
+      expect ValueError:
+        v[0] = fallibleValue(3)
+      copiesBeforeFailure = -1
+      check v == snapshot
+      check v.len == 2
+      v.add(fallibleValue(3))
+      check snapshot.len == 2
+
+  test "throwing copies release partial collision nodes":
+    for other in [0, 3]:
+      checkNoLeaks:
+        var m = toMap(
+          {BadKey(id: 1): fallibleValue(1), BadKey(id: other): fallibleValue(other)}
+        )
+        let snapshot = m
+        copiesBeforeFailure = 1
+        expect ValueError:
+          m[BadKey(id: 5)] = fallibleValue(5)
+        copiesBeforeFailure = -1
+        check snapshot.len == 2
+        check m == snapshot
+
+  test "boxes and atoms honor payload alignment":
+    checkNoLeaks:
+      let value = AlignedPayload(value: 1)
+      let b = box(value)
+      let alignment = uint(alignof(AlignedPayload))
+      check cast[uint](unsafeAddr b[]) mod alignment == 0
+      check b[].value == 1
+
+      var a = initAtom(value)
+      let updated = a.update(
+        proc(current: AlignedPayload): AlignedPayload =
+          doAssert cast[uint](unsafeAddr current) mod uint(alignof(AlignedPayload)) == 0
+          AlignedPayload(value: current.value + 1)
+      )
+      check updated.value == 2
+      check a.exchange(value).value == 2
+      check a.load().value == 1
+
   test "concurrent atom traffic frees all cells":
     var at {.global.}: Atom[Map[int, int]]
     proc work(id: int) {.thread.} =
@@ -83,4 +188,19 @@ suite "leaks":
     check at.load().len == 1_200
     at.store(default(Map[int, int]))
     # Only the atom's cell for the (node-free) empty map remains.
+    check liveAllocations() == before + 1
+
+  test "concurrent loads, stores and exchanges release all retired cells":
+    var a {.global.}: Atom[int]
+    proc work(id: int) {.thread.} =
+      for i in 0 ..< 1_000:
+        a.store(i + id)
+        doAssert a.load() >= 0
+        doAssert a.exchange(i) >= 0
+
+    let before = liveAllocations()
+    var ts: array[4, Thread[int]]
+    for i in 0 ..< ts.len:
+      createThread(ts[i], work, i)
+    joinThreads(ts)
     check liveAllocations() == before + 1
