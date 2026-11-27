@@ -346,3 +346,10 @@ suite "FlexVec get":
     check v.get(2) == some(30)
     check v.get(3).isNone and v.get(-1).isNone
     check v.getOrDefault(0) == 10 and v.getOrDefault(9, -1) == -1
+
+  test "get represents a stored nil as none":
+    var fallback: int
+    let missing: ptr int = nil
+    let v = toFlexVec([missing, addr fallback])
+    check v.get(0).isNone and v.get(1).get == addr fallback
+    check v.getOrDefault(0, addr fallback) == nil

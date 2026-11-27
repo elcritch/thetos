@@ -175,9 +175,10 @@ proc load*[T](a: var Atom[T]): T =
       releaseCell(cell)
     result = cell.value
 
-proc exchange*[T](a: var Atom[T], value: sink T): T =
-  ## Stores `value` and returns the previous value.
-  let old = a.word.exchange(packCell(newCell(value)), moAcquireRelease)
+proc replaceCell[T](a: var Atom[T], value: sink T): uint64 {.inline.} =
+  a.word.exchange(packCell(newCell(value)), moAcquireRelease)
+
+proc takePrevious[T](old: uint64): T =
   let cell = cellOf[T](old)
   if cell != nil:
     transferPending(cell, old)
@@ -187,12 +188,16 @@ proc exchange*[T](a: var Atom[T], value: sink T): T =
     if isUnique(cell):
       result = move(cell.value)
     else:
-      result = cell.value
+      resetOnError(result):
+        result = cell.value
+
+proc exchange*[T](a: var Atom[T], value: sink T): T =
+  ## Stores `value` and returns the previous value.
+  takePrevious[T](a.replaceCell(value))
 
 proc store*[T](a: var Atom[T], value: sink T) =
   ## Replaces the value.
-  let old = a.word.exchange(packCell(newCell(value)), moAcquireRelease)
-  retireCell[T](old)
+  retireCell[T](a.replaceCell(value))
 
 proc update*[T, F](a: var Atom[T], f: F): T {.discardable.} =
   ## Atomically replaces the value `x` with `f(x)` using a CAS loop and
@@ -269,12 +274,13 @@ proc newAtomRef*[T](value: sink T): AtomRef[T] =
     b.store(2)
     assert a.load() == 2
 
+  var atom = initAtom(value)
   let node = cast[ptr AtomRefNode[T]](allocAlignedRaw(
     sizeof(AtomRefNode[T]), alignof(AtomRefNode[T])
   ))
-  initRc(node) # zeroed memory is an empty atom and version 0
+  initRc(node)
+  node.atom = move(atom)
   result.node = node
-  node.atom.store(value)
 
 proc isNil*[T](r: AtomRef[T]): bool {.inline.} =
   ## True for a default-initialized or moved-from handle.
@@ -297,21 +303,28 @@ proc load*[T](r: AtomRef[T]): T =
   ## handle, as do the other operations.
   target(r).load()
 
+proc publishReplacement[T](r: AtomRef[T], value: sink T): uint64 =
+  # A payload hook may reassign the caller's handle while building the cell.
+  let keep = `=dup`(r)
+  result = target(keep).replaceCell(value)
+  published(keep)
+
 proc store*[T](r: AtomRef[T], value: sink T) =
   ## Replaces the value.
-  target(r).store(value)
-  published(r)
+  retireCell[T](r.publishReplacement(value))
 
 proc exchange*[T](r: AtomRef[T], value: sink T): T =
-  ## Stores `value` and returns the previous value.
-  result = target(r).exchange(value)
-  published(r)
+  ## Stores `value` and returns the previous value. If copying the previous
+  ## value raises, the new value and its version have already been published.
+  result = takePrevious[T](r.publishReplacement(value))
 
 proc update*[T, F](r: AtomRef[T], f: F): T {.discardable.} =
   ## Atomically replaces the value `x` with `f(x)` and returns the stored
   ## value, like `Atom.update`. `f` may run several times under contention.
-  result = target(r).update(f)
-  published(r)
+  # The callback can reassign the handle through which update was called.
+  let keep = `=dup`(r)
+  result = target(keep).update(f)
+  published(keep)
 
 template updateIt*[T](r: AtomRef[T], op: untyped): untyped =
   ## Like `update`, with the new value given as an expression of `it`, the

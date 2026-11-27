@@ -64,6 +64,9 @@ Lookups that can fail have non-raising versions: `get` returns an
 `Option` and `getOrDefault` a fallback value, for map keys
 (`m.get(key)`), vector indices (`v.get(i)`, where an out-of-range or
 negative index gives `none`) and boxes (`b.get()` on an empty box).
+For pointer-like element types, Nim’s `Option` represents a stored nil
+as `none`. Use `getOrDefault` to keep a stored nil and supply a fallback
+for a missing entry.
 
 Every `update` that takes a function also has an `updateIt` template that
 takes an expression of `it` instead, like `mapIt` in `std/sequtils`:

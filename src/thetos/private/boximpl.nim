@@ -54,7 +54,7 @@ proc get*[T](b: Box[T]): Option[T] =
   if b.isEmpty:
     none(T)
   else:
-    some(b[])
+    option(ownedCopy(b[]))
 
 proc getOrDefault*[T](b: Box[T], def: T = default(T)): T =
   ## The boxed value, or `def` for an empty box.
@@ -77,7 +77,8 @@ proc unbox*[T](b: sink Box[T]): T =
   elif isUnique(b.node):
     result = move(b.node.value)
   else:
-    result = b.node.value
+    resetOnError(result):
+      result = b.node.value
 
 template updateIt*[T](b: Box[T], op: untyped): Box[T] =
   ## Like `update`, with the new value given as an expression of `it`, the
@@ -89,7 +90,7 @@ template updateIt*[T](b: Box[T], op: untyped): Box[T] =
     if source.isEmpty:
       raise newException(ValueError, "empty Box")
     let it {.inject.} = unbox(move source)
-    box(op)
+    box[T](op)
 
 proc `==`*[T](a, b: Box[T]): bool =
   if a.node == b.node:

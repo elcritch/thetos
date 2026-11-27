@@ -115,6 +115,9 @@ suite "Box updateIt":
     expect ValueError:
       discard default(Box[int]).updateIt(it + 1)
 
+  test "updateIt uses the boxed type for its expression":
+    check box(1'i8).updateIt(0)[] == 0'i8
+
   test "updateIt moves the value out of a sole owner":
     # The expression builds a new Counted, so any copy comes from unboxing.
     var a = box(Holder(item: Counted(id: 1), label: "x"))
@@ -133,3 +136,9 @@ suite "Box get":
     check box(3).getOrDefault() == 3
     check default(Box[int]).getOrDefault() == 0
     check default(Box[int]).getOrDefault(9) == 9
+
+  test "get represents a stored nil as none":
+    var fallback: int
+    let missing: ptr int = nil
+    check box(missing).get().isNone
+    check box(missing).getOrDefault(addr fallback) == nil

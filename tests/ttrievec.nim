@@ -147,3 +147,10 @@ suite "TrieVec get":
     check v.getOrDefault(2) == 30
     check v.getOrDefault(5) == 0 and v.getOrDefault(-2, 7) == 7
     check default(TrieVec[int]).get(0).isNone
+
+  test "get represents a stored nil as none":
+    var fallback: int
+    let missing: ptr int = nil
+    let v = toTrieVec([missing, addr fallback])
+    check v.get(0).isNone and v.get(1).get == addr fallback
+    check v.getOrDefault(0, addr fallback) == nil

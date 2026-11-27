@@ -249,7 +249,7 @@ proc last*[T](v: FlexVec[T]): lent T =
 proc get*[T](v: FlexVec[T], i: int): Option[T] =
   ## Element `i`, or `none` when `i` is out of range (including negative).
   if i >= 0 and i < v.len:
-    some(v[i])
+    option(ownedCopy(v[i]))
   else:
     none(T)
 
@@ -719,8 +719,11 @@ template updateIt*[T](v: FlexVec[T], i: Natural, op: untyped): FlexVec[T] =
     var updated = v
     let index = i
     resetOnError(updated):
-      let it {.inject.} = updated[index]
-      updated[index] = op
+      let it {.inject.} = ownedCopy(updated[index])
+      var next: T
+      resetOnError(next):
+        next = op
+      updated[index] = move(next)
     updated
 
 proc take*[T](v: sink FlexVec[T], n: Natural): FlexVec[T] =

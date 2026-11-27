@@ -4,6 +4,17 @@
 import std/[unittest, typedthreads, os, strutils]
 import thetos
 import thetos/private/core
+from ./fixtures/falliblecopy import FallibleCopy, fallibleValue, expectCopyFailure
+
+type HookedValue = object
+  value: int
+
+var onSink {.threadvar.}: proc()
+
+proc `=sink`(dst: var HookedValue, src: HookedValue) =
+  if onSink != nil:
+    onSink()
+  dst.value = src.value
 
 template checkNoLeaks(body: untyped) =
   let before = liveAllocations()
@@ -33,6 +44,53 @@ suite "AtomRef":
         s & "c"
     ) == "bc"
     check r.load() == "bc"
+
+  test "exchange publishes even if copying the previous value raises":
+    checkNoLeaks:
+      let r = newAtomRef(fallibleValue(1))
+      var snapshot = r.load()
+      var seen = r.version
+      # The outer update keeps the old cell shared during the exchange.
+      expectCopyFailure(0):
+        r.update(
+          proc(old: FallibleCopy): FallibleCopy =
+            r.exchange(fallibleValue(2))
+        )
+      check r.refresh(snapshot, seen)
+      check seen == 1 and snapshot.value[] == 2
+
+  test "a failing payload hook releases a partially constructed atom":
+    checkNoLeaks:
+      onSink = proc() =
+        raise newException(ValueError, "sink failed")
+      defer:
+        onSink = nil
+      expect ValueError:
+        discard newAtomRef(HookedValue(value: 1))
+
+  test "an exchange holds the atom alive during a payload hook":
+    checkNoLeaks:
+      var owner = newAtomRef(HookedValue(value: 1))
+      onSink = proc() =
+        let before = liveAllocations()
+        reset(owner)
+        doAssert liveAllocations() == before
+      defer:
+        onSink = nil
+      check owner.exchange(HookedValue(value: 2)).value == 1
+      check owner.isNil
+
+  test "an update holds the atom alive while its callback runs":
+    checkNoLeaks:
+      var owner = newAtomRef(1)
+      let before = liveAllocations()
+      let value = owner.update(
+        proc(old: int): int =
+          reset(owner)
+          doAssert liveAllocations() == before
+          old + 1
+      )
+      check value == 2 and owner.isNil
 
   test "version counts stores and refresh reloads on change":
     let r = newAtomRef(0)
