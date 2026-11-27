@@ -59,9 +59,12 @@ proc allocFlexLeaf[T](): FlexPtr[T] =
   result.leaf = true
 
 proc allocFlexInner[T](): FlexPtr[T] =
-  result = cast[FlexPtr[T]](allocRaw(
+  # Slots at or past `count`, and sizes of a regular node, are never read,
+  # so only the header is initialized.
+  result = cast[FlexPtr[T]](allocRawUninit(
     sizeof(FlexNode[T]) + flexWidth * (sizeof(pointer) + sizeof(int))
   ))
+  zeroMem(result, sizeof(FlexNode[T]))
   initRc(result)
 
 proc release[T](n: FlexPtr[T]) {.raises: [], gcsafe.} =
@@ -159,7 +162,8 @@ proc clone[T](n: FlexPtr[T], count: int): FlexPtr[T] =
   for i in 0 ..< count:
     dst[i] = src[i]
     retain(src[i])
-    result.sizeArr[i] = n.sizeArr[i]
+  if n.relaxed:
+    copyMem(result.sizeArr, n.sizeArr, count * sizeof(int))
   result.count = count
   result.relaxed = n.relaxed
 
