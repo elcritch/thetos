@@ -200,9 +200,10 @@ API: `initTrieVec`, `toTrieVec`, `len`, `high`, `low`, `[]` (also `^i`),
 
 `FlexVec[T]` is a relaxed radix-balanced (RRB) tree, after
 `immer::flex_vector`. It has the whole `TrieVec` API, and concatenation,
-slicing, `drop`, `insert`, `erase` and `pushFront` are O(log n) and share
-structure with their inputs. Leaves hold up to 128 trivially copyable one-byte
-elements or up to 32 elements of other types.
+slicing, `drop`, `insert` and `erase` are O(log n) and share structure with
+their inputs. A head buffer, like the tail, makes `pushFront` and repeated
+small `drop`s amortized O(1). Leaves hold up to 128 trivially copyable
+one-byte elements or up to 32 elements of other types.
 
 ```nim
 import thetos

@@ -152,6 +152,52 @@ suite "FlexVec":
         discard v.checkInvariants()
     check v.len == 0
 
+  test "front edits go through the head leaf":
+    checkNoLeaks:
+      var v: FlexVec[int]
+      var model: seq[int]
+      var snaps: seq[(FlexVec[int], seq[int])]
+      for i in 0 ..< 1000:
+        v = v.pushFront(i)
+        model.insert(i, 0)
+        if i mod 97 == 0:
+          snaps.add (v, model)
+      check v.agrees(model)
+      for (snap, m) in snaps:
+        check snap.agrees(m)
+
+      # Elements in the head can be replaced, taken and dropped.
+      var w = v
+      w[0] = -1
+      w[1] = -2
+      check w[0] == -1 and w[1] == -2 and v[0] == 999
+      check w.take(1).agrees(@[-1])
+      check w.take(3).agrees(@[-1, -2, model[2]])
+
+      # Repeated small drops keep the rest of a leaf as the head.
+      var d = v
+      var dm = model
+      for k in 0 ..< 300:
+        d = d.drop(1 + k mod 3)
+        dm = dm[1 + k mod 3 .. ^1]
+        if k mod 37 == 0:
+          check d.agrees(dm)
+      check d.agrees(dm)
+
+      # Concatenation with heads on both sides.
+      let both = d & v.drop(5)
+      check both.agrees(dm & model[5 .. ^1])
+      var tiny = toFlexVec([7, 8]).pushFront(6)
+      tiny.add(v.drop(1).take(3))
+      check tiny.agrees(@[6, 7, 8] & model[1 .. 3])
+
+      var seen = 0
+      for (p, n) in both.chunks:
+        for k in 0 ..< n:
+          check p[k] == (dm & model[5 .. ^1])[seen + k]
+        seen += n
+      check seen == both.len
+
   test "chunk iteration keeps its version alive during reassignment":
     var v = rangeVec(0, 2100)
     var seen = 0
@@ -300,8 +346,10 @@ suite "FlexVec":
               v = v.erase(i)
               model.delete(i)
           of 9:
-            v = v.pushFront(x)
-            model.insert(x, 0)
+            # Runs long enough to fill the head and push it into the tree.
+            for k in 0 ..< r.rand(1 .. 70):
+              v = v.pushFront(x + k)
+              model.insert(x + k, 0)
           of 10:
             if v.len > 0:
               let a = r.rand(v.high)
@@ -364,9 +412,13 @@ suite "FlexVec exception safety":
       expectCopyFailure(1):
         v.add(other)
       check v == source
+      # Prepending shares the existing leaves; only a shared head is copied.
+      let front = source.pushFront(fallibleValue(-1)).pushFront(fallibleValue(-2))
+      check front.len == 5 and source.len == 3
       expectCopyFailure(1):
-        discard source.pushFront(fallibleValue(-1))
-      check source.len == 3
+        discard front.pushFront(fallibleValue(-3))
+      check front.len == 5 and front[0] == fallibleValue(-2) and
+        front[1] == fallibleValue(-1)
 
   test "failed slicing, insertion and conversion release their allocations":
     checkNoLeaks:

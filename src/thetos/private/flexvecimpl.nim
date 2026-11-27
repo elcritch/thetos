@@ -31,8 +31,9 @@ type
     ## and slicing.
     size: int
     shift: int ## level of `root` in steps of flexBits, 0 for a leaf
-    root: FlexPtr[T] ## tree holding all but the tail, or nil
+    root: FlexPtr[T] ## tree holding all but the head and tail, or nil
     tail: FlexPtr[T] ## leaf holding the final elements, nil when empty
+    head: FlexPtr[T] ## leaf holding the first elements, or nil
 
 # Inner nodes: header | children: array[32, ptr] | sizes: array[32, int].
 # `sizes[k]` is the number of elements in children 0..k; it is only
@@ -181,33 +182,41 @@ proc ensureOwned[T](slot: var FlexPtr[T]) =
 proc `=destroy`*[T](v: FlexVec[T]) =
   release(v.root)
   release(v.tail)
+  release(v.head)
 
 proc `=wasMoved`*[T](v: var FlexVec[T]) =
   v.size = 0
   v.shift = 0
   v.root = nil
   v.tail = nil
+  v.head = nil
 
 proc `=dup`*[T](v: FlexVec[T]): FlexVec[T] =
   if v.root != nil:
     retain(v.root)
   if v.tail != nil:
     retain(v.tail)
+  if v.head != nil:
+    retain(v.head)
   result.size = v.size
   result.shift = v.shift
   result.root = v.root
   result.tail = v.tail
+  result.head = v.head
 
 proc `=copy`*[T](dst: var FlexVec[T], src: FlexVec[T]) =
   if src.root != nil:
     retain(src.root)
   if src.tail != nil:
     retain(src.tail)
+  if src.head != nil:
+    retain(src.head)
   `=destroy`(dst)
   dst.size = src.size
   dst.shift = src.shift
   dst.root = src.root
   dst.tail = src.tail
+  dst.head = src.head
 
 proc initFlexVec*[T](): FlexVec[T] =
   ## Returns an empty vector. `default(FlexVec[T])` is also empty.
@@ -222,7 +231,11 @@ proc high*[T](v: FlexVec[T]): int {.inline.} =
 proc low*[T](v: FlexVec[T]): int {.inline.} =
   0
 
-template treeSize[T](v: FlexVec[T]): int =
+template headLen[T](v: FlexVec[T]): int =
+  (if v.head == nil: 0 else: v.head.count)
+
+template tailStart[T](v: FlexVec[T]): int =
+  ## Index of the first element in the tail.
   (if v.tail == nil: 0 else: v.size - v.tail.count)
 
 proc leafAt[T](root: FlexPtr[T], shift, idx: int): (FlexPtr[T], int) =
@@ -244,12 +257,17 @@ template checkFlexIndex(v, i: untyped) =
 
 proc `[]`*[T](v: FlexVec[T], i: Natural): lent T =
   checkFlexIndex(v, i)
-  let off = v.treeSize
+  let off = v.size - v.tail.count # the tail exists once the index is valid
   if i >= off:
     return v.tail.elemArr[i - off]
+  var idx = int(i)
+  let head = v.head
+  if head != nil:
+    if idx < head.count:
+      return head.elemArr[idx]
+    idx -= head.count
   var n = v.root
   var s = v.shift
-  var idx = int(i)
   while s > 0:
     let (j, local) = findChild(n, s, idx)
     idx = local
@@ -400,12 +418,19 @@ proc `[]=`*[T](v: var FlexVec[T], i: Natural, x: sink T) =
   defer:
     reset(value)
   checkFlexIndex(v, i)
-  let off = v.treeSize
+  let off = v.size - v.tail.count # the tail exists once the index is valid
   if i >= off:
     ensureOwned(v.tail)
     v.tail.elemArr[i - off] = move(value)
-  else:
-    assocRec(v.root, v.shift, i, value)
+    return
+  var idx = int(i)
+  if v.head != nil:
+    if idx < v.head.count:
+      ensureOwned(v.head)
+      v.head.elemArr[idx] = move(value)
+      return
+    idx -= v.head.count
+  assocRec(v.root, v.shift, idx, value)
 
 proc treeTake[T](slot: var FlexPtr[T], s, n: int) =
   ## Keeps the first `n` elements below `slot`, where `0 < n < size` and `n`
@@ -434,7 +459,8 @@ proc truncate[T](v: var FlexVec[T], n: int) =
     `=destroy`(v)
     `=wasMoved`(v)
     return
-  let off = v.treeSize
+  let off = v.tailStart
+  let hc = v.headLen
   if n > off:
     let keep = n - off
     if isUnique(v.tail):
@@ -445,15 +471,26 @@ proc truncate[T](v: var FlexVec[T], n: int) =
       let c = clone(v.tail, keep)
       release(v.tail)
       v.tail = c
+  elif n <= hc:
+    # What is left of the head becomes the tail.
+    let newTail = (if n == hc: (retain(v.head); v.head) else: clone(v.head, n))
+    release(v.root)
+    release(v.tail)
+    release(v.head)
+    v.root = nil
+    v.shift = 0
+    v.head = nil
+    v.tail = newTail
   else:
     # The leaf holding the new last element becomes the tail.
-    let (leaf, start) = leafAt(v.root, v.shift, n - 1)
+    let m = n - hc # elements kept in the tree
+    let (leaf, start) = leafAt(v.root, v.shift, m - 1)
     var newTail: FlexPtr[T]
-    if n - start == leaf.count:
+    if m - start == leaf.count:
       retain(leaf)
       newTail = leaf
     else:
-      newTail = clone(leaf, n - start)
+      newTail = clone(leaf, m - start)
     release(v.tail)
     v.tail = newTail
     if start == 0:
@@ -491,30 +528,60 @@ proc treeDrop[T](node: FlexPtr[T], s, n: int): FlexPtr[T] =
   result.count = node.count - j
   finishInner(result, s)
 
-proc dropFront[T](v: var FlexVec[T], n: int) =
-  ## Removes the first `n` elements.
+proc dropFront[T](v: var FlexVec[T], n: int, toHead = true) =
+  ## Removes the first `n` elements. With `toHead`, what is left of a
+  ## partly dropped tree leaf becomes the head, so further small drops do
+  ## not touch the tree; callers that concatenate right away pass false.
   if n <= 0:
     return
   if n >= v.size:
     `=destroy`(v)
     `=wasMoved`(v)
     return
-  let off = v.treeSize
+  let hc = v.headLen
+  if n <= hc:
+    let head = (if n == hc: nil else: treeDrop(v.head, 0, n))
+    release(v.head)
+    v.head = head
+    v.size -= n
+    return
+  let off = v.tailStart
   if n >= off:
     let newTail =
       (if n == off: (retain(v.tail); v.tail) else: treeDrop(v.tail, 0, n - off))
     release(v.root)
-    v.root = nil
-    v.shift = 0
+    release(v.head)
     release(v.tail)
+    v.root = nil
+    v.head = nil
+    v.shift = 0
     v.tail = newTail
-  else:
-    var root = treeDrop(v.root, v.shift, n)
+  elif not toHead:
+    var root = treeDrop(v.root, v.shift, n - hc)
     var shift = v.shift
     normalize(root, shift)
     release(v.root)
+    release(v.head)
     v.root = root
     v.shift = shift
+    v.head = nil
+  else:
+    let m = n - hc # elements dropped from the tree
+    let (leaf, start) = leafAt(v.root, v.shift, m)
+    let next = start + leaf.count
+    var head = (if m == start: (retain(leaf); leaf)
+    else: treeDrop(leaf, 0, m - start))
+    var root: FlexPtr[T]
+    var shift = 0
+    if next < off - hc:
+      root = treeDrop(v.root, v.shift, next)
+      shift = v.shift
+      normalize(root, shift)
+    release(v.root)
+    release(v.head)
+    v.root = root
+    v.shift = shift
+    v.head = head
   v.size -= n
 
 # Concatenation ----------------------------------------------------------
@@ -705,17 +772,24 @@ proc add*[T](v: var FlexVec[T], w: FlexVec[T]) =
     return
   let keep = `=dup`(w) # `w` may alias `v`
   if keep.root == nil:
+    # Few elements, all in the head and tail of `w`.
     when supportsCopyMem(T):
+      if keep.head != nil:
+        v.add(toOpenArray(keep.head.elemArr, 0, keep.head.count - 1))
       v.add(toOpenArray(keep.tail.elemArr, 0, keep.tail.count - 1))
     else:
-      # Few elements: append them through a copy so a failing element copy
-      # leaves `v` unchanged.
+      # Append them through a copy so a failing element copy leaves `v`
+      # unchanged.
       var res = v
+      if keep.head != nil:
+        for k in 0 ..< keep.head.count:
+          appendCopy(res, keep.head.elemArr[k])
       for k in 0 ..< keep.tail.count:
         appendCopy(res, keep.tail.elemArr[k])
       v = move(res)
     return
-  # The left tree is `v` with its tail pushed in.
+  # The left tree is the tree of `v` followed by its tail and the head of
+  # `w`; the head of `v` stays in place.
   var left: FlexVec[T]
   left.root = v.root
   left.shift = v.shift
@@ -731,6 +805,9 @@ proc add*[T](v: var FlexVec[T], w: FlexVec[T]) =
       retain(left.root)
     retain(v.tail)
     pushLeaf(left.root, left.shift, v.tail)
+  if keep.head != nil:
+    retain(keep.head)
+    pushLeaf(left.root, left.shift, keep.head)
   let (root, shift) = concatTrees(left.root, left.shift, keep.root, keep.shift)
   release(v.root)
   release(v.tail)
@@ -739,6 +816,45 @@ proc add*[T](v: var FlexVec[T], w: FlexVec[T]) =
   retain(keep.tail)
   v.tail = keep.tail
   v.size += keep.size
+
+proc absorbHead[T](v: var FlexVec[T]) =
+  ## Moves the head leaf into the tree.
+  if v.root == nil:
+    v.root = v.head
+    v.shift = 0
+  else:
+    let (root, shift) = concatTrees(v.head, 0, v.root, v.shift)
+    release(v.root)
+    release(v.head)
+    v.root = root
+    v.shift = shift
+  v.head = nil
+
+proc prepend[T](v: var FlexVec[T], x: sink T) =
+  var value = x
+  defer:
+    reset(value)
+  if v.size == high(int):
+    raiseFlexOverflow()
+  if v.size == 0:
+    v.add(move(value))
+    return
+  if v.head == nil:
+    v.head = allocFlexLeaf[T]()
+  elif v.head.count == leafWidth(T):
+    absorbHead(v)
+    v.head = allocFlexLeaf[T]()
+  else:
+    ensureOwned(v.head)
+  let es = v.head.elemArr
+  when supportsCopyMem(T):
+    moveMem(addr es[1], addr es[0], v.head.count * sizeof(T))
+  else:
+    for k in countdown(v.head.count, 1):
+      es[k] = move(es[k - 1])
+  es[0] = move(value)
+  inc v.head.count
+  inc v.size
 
 proc `&`*[T](a: sink FlexVec[T], b: FlexVec[T]): FlexVec[T] =
   ## Concatenation in O(log n).
@@ -765,10 +881,10 @@ proc pushBack*[T](v: sink FlexVec[T], x: sink T): FlexVec[T] =
     result.add(x)
 
 proc pushFront*[T](v: sink FlexVec[T], x: sink T): FlexVec[T] =
-  ## Returns a vector with `x` prepended, in O(log n).
+  ## Returns a vector with `x` prepended, in amortized O(1).
+  result = v
   resetOnError(result):
-    result.add(x)
-    result.add(v)
+    result.prepend(x)
 
 proc popBack*[T](v: sink FlexVec[T]): FlexVec[T] =
   ## Returns a vector without its last element.
@@ -843,7 +959,7 @@ proc insert*[T](v: sink FlexVec[T], i: Natural, x: sink T): FlexVec[T] =
         raiseIndex(i, result.size + 1)
       var right = result
       resetOnError(right):
-        dropFront(right, i)
+        dropFront(right, i, toHead = false)
         truncate(result, i)
         result.add(move(value))
         result.add(right)
@@ -855,7 +971,7 @@ proc erase*[T](v: sink FlexVec[T], i: Natural): FlexVec[T] =
     checkFlexIndex(result, i)
     var right = result
     resetOnError(right):
-      dropFront(right, i + 1)
+      dropFront(right, i + 1, toHead = false)
       truncate(result, i)
       result.add(right)
 
@@ -867,6 +983,7 @@ type LeafCursor[T] = object
   stack: array[16, tuple[node: FlexPtr[T], next: int]]
   depth: int
   tail: FlexPtr[T]
+  root: FlexPtr[T] ## tree still to walk after the head
 
 proc descendLeft[T](c: var LeafCursor[T], subtree: FlexPtr[T]): FlexPtr[T] {.inline.} =
   var node = subtree
@@ -878,9 +995,13 @@ proc descendLeft[T](c: var LeafCursor[T], subtree: FlexPtr[T]): FlexPtr[T] {.inl
 
 proc firstLeaf[T](c: var LeafCursor[T], v: FlexVec[T]): FlexPtr[T] {.inline.} =
   # The caller owns the vector throughout the walk.
-  if v.root == nil:
-    return v.tail
   c.tail = v.tail
+  if v.head != nil:
+    c.root = v.root
+    return v.head
+  if v.root == nil:
+    c.tail = nil
+    return v.tail
   c.descendLeft(v.root)
 
 proc nextLeaf[T](c: var LeafCursor[T]): FlexPtr[T] {.inline.} =
@@ -891,6 +1012,10 @@ proc nextLeaf[T](c: var LeafCursor[T]): FlexPtr[T] {.inline.} =
       inc c.stack[top].next
       return c.descendLeft(parent.childArr[next])
     dec c.depth
+  if c.root != nil:
+    let root = c.root
+    c.root = nil
+    return c.descendLeft(root)
   result = c.tail
   c.tail = nil
 
@@ -931,7 +1056,7 @@ proc toFlexVec*[T](v: TrieVec[T]): FlexVec[T] =
 proc `==`*[T](a, b: FlexVec[T]): bool =
   if a.size != b.size:
     return false
-  if a.root == b.root and a.tail == b.tail:
+  if a.root == b.root and a.tail == b.tail and a.head == b.head:
     return true
   # Walk both trees leaf by leaf; their leaf boundaries may differ.
   var left, right: LeafCursor[T]
@@ -1015,11 +1140,16 @@ when defined(thetosDebug):
     ## Verifies the tree structure and returns its shape. Raises
     ## `AssertionDefect` on a violation. Only with `-d:thetosDebug`.
     if v.size == 0:
-      doAssert v.root == nil and v.tail == nil, "empty vector holds nodes"
+      doAssert v.root == nil and v.tail == nil and v.head == nil,
+        "empty vector holds nodes"
       return
     doAssert v.tail != nil and v.tail.leaf, "missing tail"
     doAssert v.tail.count in 1 .. leafWidth(T), "bad tail count"
-    let off = v.size - v.tail.count
+    var off = v.size - v.tail.count
+    if v.head != nil:
+      doAssert v.head.leaf, "head is not a leaf"
+      doAssert v.head.count in 1 .. leafWidth(T), "bad head count"
+      off -= v.head.count
     if v.root == nil:
       doAssert off == 0 and v.shift == 0, "tree size without a tree"
       return

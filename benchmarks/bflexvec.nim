@@ -123,18 +123,21 @@ for n in sizes:
   bench("a & b, " & $n & " + " & $n, N):
     for k in 0 ..< N:
       sink0 += (a & b).len
-  bench("unique v.add(w) of 50, until " & $n, n div 50):
-    var v: FlexVec[int]
-    let w = regular(50)
-    while v.len < n:
-      v.add w
-    sink0 += v.len
-  bench("unique v.add(w) of 1000, until " & $(n * 10), n div 100):
-    var v: FlexVec[int]
-    let w = regular(1000)
-    while v.len < n * 10:
-      v.add w
-    sink0 += v.len
+  let reps = 1_000_000 div n # keeps each sample long enough to time
+  let w50 = regular(50)
+  let w1000 = regular(1000)
+  bench("unique v.add(w) of 50, until " & $n, reps * (n div 50)):
+    for r in 0 ..< reps:
+      var v: FlexVec[int]
+      while v.len < n:
+        v.add w50
+      sink0 += v.len
+  bench("unique v.add(w) of 1000, until " & $(n * 10), reps * (n div 100)):
+    for r in 0 ..< reps:
+      var v: FlexVec[int]
+      while v.len < n * 10:
+        v.add w1000
+      sink0 += v.len
   let s = strings(n)
   bench("strings: s & s, " & $n, N):
     for k in 0 ..< N:
@@ -143,6 +146,7 @@ for n in sizes:
 section("Edits in the middle and at the front")
 for n in sizes:
   let a = regular(n)
+  let reps = 1_000_000 div n
   const N = 20_000
   bench("insert middle, persistent, " & $n, N):
     for k in 0 ..< N:
@@ -150,27 +154,30 @@ for n in sizes:
   bench("erase middle, persistent, " & $n, N):
     for k in 0 ..< N:
       sink0 += a.erase(n div 2).len
-  bench("insert random, unique, into " & $n, 2000):
-    var v = a
-    for k in 0 ..< 2000:
-      v = v.insert(next(v.len), k)
-    sink0 += v.len
+  bench("insert random, unique, into " & $n, 20_000):
+    for r in 0 ..< 10:
+      var v = a
+      for k in 0 ..< 2000:
+        v = v.insert(next(v.len), k)
+      sink0 += v.len
   bench("drop(1), persistent, " & $n, N):
     for k in 0 ..< N:
       sink0 += a.drop(1).len
-  bench("drop(1) repeated, unique, half of " & $n, n div 2):
-    var v = a
-    for k in 0 ..< n div 2:
-      v = v.drop(1)
-    sink0 += v.len
+  bench("drop(1) repeated, unique, half of " & $n, reps * (n div 2)):
+    for r in 0 ..< reps:
+      var v = a
+      for k in 0 ..< n div 2:
+        v = v.drop(1)
+      sink0 += v.len
   bench("pushFront, persistent, " & $n, N):
     for k in 0 ..< N:
       sink0 += a.pushFront(k).len
-  bench("pushFront repeated, unique, from empty to " & $n, n):
-    var v: FlexVec[int]
-    for k in 0 ..< n:
-      v = v.pushFront(k)
-    sink0 += v.len
+  bench("pushFront repeated, unique, from empty to " & $n, reps * n):
+    for r in 0 ..< reps:
+      var v: FlexVec[int]
+      for k in 0 ..< n:
+        v = v.pushFront(k)
+      sink0 += v.len
 
 echo ""
 echo "sink: ", sink0
