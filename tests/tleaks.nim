@@ -41,10 +41,11 @@ template checkNoLeaks(body: untyped) =
 
 proc churn() =
   var r = initRand(11)
-  var m: Map[int, Vector[string]]
-  var s: Set[BadKey]
-  var v: Vector[Map[int, int]]
-  var keep: seq[(Map[int, Vector[string]], Set[BadKey], Vector[Map[int, int]])]
+  var m: TrieMap[int, TrieVec[string]]
+  var s: TrieSet[BadKey]
+  var v: TrieVec[TrieMap[int, int]]
+  var keep:
+    seq[(TrieMap[int, TrieVec[string]], TrieSet[BadKey], TrieVec[TrieMap[int, int]])]
   for step in 0 ..< 5_000:
     let k = r.rand(500)
     case r.rand(5)
@@ -56,11 +57,11 @@ proc churn() =
         discard v.pop()
     of 2:
       if v.len > 0:
-        v[r.rand(v.high)] = toMap({k: step})
+        v[r.rand(v.high)] = toTrieMap({k: step})
     else:
-      m[k] = toVector([$step])
+      m[k] = toTrieVec([$step])
       s.incl(BadKey(id: k))
-      v.add(toMap({k: step}))
+      v.add(toTrieMap({k: step}))
     if step mod 500 == 0:
       keep.add((m, s, v))
   for (km, ks, kv) in keep.mitems:
@@ -75,13 +76,13 @@ suite "leaks":
 
   test "boxes and atoms free their cells":
     checkNoLeaks:
-      var a = initAtom(box(toMap({1: "a"})))
+      var a = initAtom(box(toTrieMap({1: "a"})))
       for i in 0 ..< 100:
         a.update(
-          proc(b: Box[Map[int, string]]): Box[Map[int, string]] =
+          proc(b: Box[TrieMap[int, string]]): Box[TrieMap[int, string]] =
             box(b[].put(i, $i))
         )
-      discard a.exchange(box(initMap[int, string]()))
+      discard a.exchange(box(initTrieMap[int, string]()))
       check a.load()[].len == 0
 
   test "throwing atom updates release their snapshots":
@@ -111,7 +112,7 @@ suite "leaks":
 
   test "throwing copies release partial map clones":
     checkNoLeaks:
-      var m = toMap({1: fallibleValue(1), 2: fallibleValue(2)})
+      var m = toTrieMap({1: fallibleValue(1), 2: fallibleValue(2)})
       let snapshot = m
       copiesBeforeFailure = 1
       expect ValueError:
@@ -124,7 +125,7 @@ suite "leaks":
 
   test "throwing copies release partial vector clones":
     checkNoLeaks:
-      var v = toVector([fallibleValue(1), fallibleValue(2)])
+      var v = toTrieVec([fallibleValue(1), fallibleValue(2)])
       let snapshot = v
       copiesBeforeFailure = 1
       expect ValueError:
@@ -141,7 +142,7 @@ suite "leaks":
   test "throwing copies release partial collision nodes":
     for other in [0, 3]:
       checkNoLeaks:
-        var m = toMap(
+        var m = toTrieMap(
           {BadKey(id: 1): fallibleValue(1), BadKey(id: other): fallibleValue(other)}
         )
         let snapshot = m
@@ -171,11 +172,11 @@ suite "leaks":
       check a.load().value == 1
 
   test "concurrent atom traffic frees all cells":
-    var at {.global.}: Atom[Map[int, int]]
+    var at {.global.}: Atom[TrieMap[int, int]]
     proc work(id: int) {.thread.} =
       for i in 0 ..< 300:
         at.update(
-          proc(m: Map[int, int]): Map[int, int] =
+          proc(m: TrieMap[int, int]): TrieMap[int, int] =
             m.put(id * 300 + i, i)
         )
         discard at.load().len
@@ -186,7 +187,7 @@ suite "leaks":
       createThread(ts[i], work, i)
     joinThreads(ts)
     check at.load().len == 1_200
-    at.store(default(Map[int, int]))
+    at.store(default(TrieMap[int, int]))
     # Only the atom's cell for the (node-free) empty map remains.
     check liveAllocations() == before + 1
 

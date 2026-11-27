@@ -24,13 +24,20 @@
 ## global, an object shared by pointer, or `createShared` memory.
 
 runnableExamples:
-  import thetos/hashmap
-  var counts: Atom[Map[string, int]]
+  import thetos/triemap
+  var counts: Atom[TrieMap[string, int]]
   counts.update(
-    proc(m: Map[string, int]): Map[string, int] =
+    proc(m: TrieMap[string, int]): TrieMap[string, int] =
       m.put("hits", m.getOrDefault("hits") + 1)
   )
   assert counts.load()["hits"] == 1
+
+when defined(thetosSingleThread):
+  {.
+    error:
+      "thetos/atom shares values between threads and cannot be used " &
+      "with -d:thetosSingleThread"
+  .}
 
 import std/atomics
 import ./private/core

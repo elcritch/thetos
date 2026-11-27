@@ -2,23 +2,23 @@
 ## containers must not depend on atomic `ref` counting.
 
 import std/[unittest, typedthreads]
-import thetos/[atom, hashmap, vector, hashset]
+import thetos/[atom, triemap, trievec, trieset]
 
 const
   threadCount = 8
   perThread = 2_000
 
 var
-  shared: Atom[Map[int, int]]
-  base: Map[int, int]
-  baseVec: Vector[string]
+  shared: Atom[TrieMap[int, int]]
+  base: TrieMap[int, int]
+  baseVec: TrieVec[string]
   stop: Atom[bool]
 
 proc writer(id: int) {.thread.} =
   for i in 0 ..< perThread:
     let key = id * perThread + i
     shared.update(
-      proc(m: Map[int, int]): Map[int, int] =
+      proc(m: TrieMap[int, int]): TrieMap[int, int] =
         m.put(key, i)
     )
 
@@ -52,7 +52,7 @@ proc forker(id: int) {.thread.} =
 
 suite "threads":
   test "concurrent CAS updates lose nothing":
-    shared.store(initMap[int, int]())
+    shared.store(initTrieMap[int, int]())
     stop.store(false)
     var writers: array[threadCount, Thread[int]]
     var readers: array[2, Thread[int]]
@@ -68,11 +68,11 @@ suite "threads":
     for id in 0 ..< threadCount:
       for i in 0 ..< perThread:
         check final[id * perThread + i] == i
-    shared.store(initMap[int, int]())
+    shared.store(initTrieMap[int, int]())
 
   test "threads path-copy shared structure independently":
-    base = initMap[int, int]()
-    baseVec = initVector[string]()
+    base = initTrieMap[int, int]()
+    baseVec = initTrieVec[string]()
     for i in 0 ..< 5_000:
       base[i] = i
       baseVec.add($i)
@@ -84,15 +84,15 @@ suite "threads":
     for i in 0 ..< 5_000:
       check base[i] == i
       check baseVec[i] == $i
-    base = initMap[int, int]()
-    baseVec = initVector[string]()
+    base = initTrieMap[int, int]()
+    baseVec = initTrieVec[string]()
 
   test "sets cross threads through an atom":
-    var a {.global.}: Atom[Set[int]]
+    var a {.global.}: Atom[TrieSet[int]]
     proc adder(id: int) {.thread.} =
       for i in 0 ..< 500:
         a.update(
-          proc(s: Set[int]): Set[int] =
+          proc(s: TrieSet[int]): TrieSet[int] =
             s.insert(id * 500 + i)
         )
 

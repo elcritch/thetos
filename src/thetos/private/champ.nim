@@ -1,5 +1,5 @@
-## CHAMP (Compressed Hash-Array Mapped Prefix-tree) core shared by `Map`
-## and `Set`.
+## CHAMP (Compressed Hash-Array Mapped Prefix-tree) core shared by `TrieMap`
+## and `TrieSet`.
 ##
 ## Each node is one shared-heap block laid out as:
 ##

@@ -1,5 +1,5 @@
 import std/[unittest, tables, random, hashes, options, sequtils, algorithm]
-import thetos/hashmap
+import thetos/triemap
 
 type BadKey = object ## Key whose hash collides heavily, to exercise collision nodes.
   id: int
@@ -23,7 +23,7 @@ proc hash(k: FlakyKey): Hash =
 proc `==`(a, b: FlakyKey): bool =
   a.id == b.id
 
-proc checkModel[K, V](m: Map[K, V], model: Table[K, V]) =
+proc checkModel[K, V](m: TrieMap[K, V], model: Table[K, V]) =
   check m.len == model.len
   var seen = 0
   for k, v in m:
@@ -35,9 +35,9 @@ proc checkModel[K, V](m: Map[K, V], model: Table[K, V]) =
     check k in m
     check m[k] == v
 
-suite "Map":
+suite "TrieMap":
   test "empty map":
-    let m = initMap[int, int]()
+    let m = initTrieMap[int, int]()
     check m.len == 0
     check 1 notin m
     check $m == "{:}"
@@ -45,10 +45,10 @@ suite "Map":
     check m.get(1).isNone
     expect KeyError:
       discard m[1]
-    check default(Map[int, int]) == m
+    check default(TrieMap[int, int]) == m
 
   test "insert, lookup and update keep older versions intact":
-    var a = initMap[string, int]()
+    var a = initTrieMap[string, int]()
     a["one"] = 1
     let b = a.put("two", 2)
     let c = b.put("one", 100)
@@ -62,7 +62,7 @@ suite "Map":
     check b.get("two") == some(2)
 
   test "erase and del":
-    let a = toMap({1: "a", 2: "b", 3: "c"})
+    let a = toTrieMap({1: "a", 2: "b", 3: "c"})
     let b = a.erase(2)
     check a.len == 3
     check b.len == 2
@@ -77,7 +77,7 @@ suite "Map":
     check b.len == 2
 
   test "update applies a function, default for missing keys":
-    let a = toMap({"x": 1})
+    let a = toTrieMap({"x": 1})
     let b = a.update(
       "x",
       proc(v: int): int =
@@ -94,9 +94,9 @@ suite "Map":
 
   test "random operations agree with Table and snapshots stay frozen":
     var r = initRand(1234)
-    var m = initMap[int, int]()
+    var m = initTrieMap[int, int]()
     var model = initTable[int, int]()
-    var snapshots: seq[(Map[int, int], Table[int, int])]
+    var snapshots: seq[(TrieMap[int, int], Table[int, int])]
     for step in 0 ..< 20_000:
       let k = r.rand(3000)
       if r.rand(3) == 0:
@@ -112,7 +112,7 @@ suite "Map":
       checkModel(snap, snapModel)
 
   test "deleting everything returns to empty":
-    var m = initMap[int, int]()
+    var m = initTrieMap[int, int]()
     for i in 0 ..< 5000:
       m[i] = i
     let full = m
@@ -122,13 +122,13 @@ suite "Map":
     for k in keys:
       m.del(k)
     check m.len == 0
-    check m == initMap[int, int]()
+    check m == initTrieMap[int, int]()
     check full.len == 5000
     for i in 0 ..< 5000:
       check full[i] == i
 
   test "hash collisions":
-    var m = initMap[BadKey, int]()
+    var m = initTrieMap[BadKey, int]()
     var model = initTable[BadKey, int]()
     var r = initRand(99)
     for step in 0 ..< 3000:
@@ -146,13 +146,13 @@ suite "Map":
   test "a raising hash leaves the map intact":
     for shared in [false, true]:
       flakyId = -1
-      var m = initMap[FlakyKey, string]()
+      var m = initTrieMap[FlakyKey, string]()
       m[FlakyKey(id: 1)] = "one"
       let snapshot =
         if shared:
           m
         else:
-          initMap[FlakyKey, string]()
+          initTrieMap[FlakyKey, string]()
       flakyId = 1 # rehashing the existing key 1 now raises
       expect ValueError:
         m[FlakyKey(id: 2)] = "two"
@@ -164,7 +164,7 @@ suite "Map":
         check snapshot[FlakyKey(id: 1)] == "one"
 
   test "equality and hashing are order independent":
-    var a, b: Map[int, string]
+    var a, b: TrieMap[int, string]
     for i in 0 ..< 300:
       a[i] = $i
     for i in countdown(299, 0):
@@ -175,8 +175,8 @@ suite "Map":
     check a != b
 
   test "nested persistent values":
-    var outer = initMap[string, Map[int, int]]()
-    outer["a"] = toMap({1: 1})
+    var outer = initTrieMap[string, TrieMap[int, int]]()
+    outer["a"] = toTrieMap({1: 1})
     let before = outer
     var inner = outer["a"]
     inner[2] = 2
@@ -185,7 +185,7 @@ suite "Map":
     check outer["a"].len == 2
 
   test "iterating while reassigning the source sees a snapshot":
-    var m = toMap({1: 1, 2: 2, 3: 3})
+    var m = toTrieMap({1: 1, 2: 2, 3: 3})
     var total = 0
     for k, v in m:
       m.del(k)
@@ -194,12 +194,12 @@ suite "Map":
     check m.len == 0
 
   test "keys and values":
-    let m = toMap({3: "c", 1: "a", 2: "b"})
+    let m = toTrieMap({3: "c", 1: "a", 2: "b"})
     check toSeq(m.keys).sorted == @[1, 2, 3]
     check toSeq(m.values).sorted == @["a", "b", "c"]
 
   test "trie stays shallow":
-    var m = initMap[int, int]()
+    var m = initTrieMap[int, int]()
     for i in 0 ..< 100_000:
       m[i] = i
     check m.depth <= 9 # log32(100k) ~ 4, plus random prefix collisions

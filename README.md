@@ -12,25 +12,25 @@ except the changed path, and every older version stays valid. Nodes use
 versions can be handed between threads with no locks, under `--mm:arc`,
 `--mm:orc` or `--mm:atomicArc`.
 
-| thetos  | immer         | Structure                                   |
-|-------------|---------------|---------------------------------------------|
-| `Map[K, V]` | `immer::map`  | CHAMP hash trie, 32-way, 64-bit hashes      |
-| `Set[T]`    | `immer::set`  | CHAMP hash trie                             |
-| `Vector[T]` | `immer::vector` | 32-way radix-balanced tree with tail      |
-| `Box[T]`    | `immer::box`  | refcounted immutable value                  |
-| `Atom[T]`   | `immer::atom` | lock-free cell to publish new versions      |
+| thetos          | immer           | Structure                              |
+|-----------------|-----------------|----------------------------------------|
+| `TrieMap[K, V]` | `immer::map`    | CHAMP hash trie, 32-way, 64-bit hashes |
+| `TrieSet[T]`    | `immer::set`    | CHAMP hash trie                        |
+| `TrieVec[T]`    | `immer::vector` | 32-way radix-balanced tree with tail   |
+| `Box[T]`        | `immer::box`    | refcounted immutable value             |
+| `Atom[T]`       | `immer::atom`   | lock-free cell to publish new versions |
 
 ## Example
 
 ```nim
 import thetos
 
-var a = initMap[string, int]()
+var a = initTrieMap[string, int]()
 a["one"] = 1                  # edits only this map value
 let b = a.put("two", 2)       # functional update; `a` is unchanged
 assert a.len == 1 and b.len == 2
 
-var v = toVector([1, 2, 3])
+var v = toTrieVec([1, 2, 3])
 let w = v.pushBack(4)
 v[0] = 10
 assert w[0] == 1              # `w` still sees the old element
@@ -42,11 +42,11 @@ Sharing state between threads:
 import std/typedthreads
 import thetos
 
-var state: Atom[Map[int, string]]
+var state: Atom[TrieMap[int, string]]
 
 proc worker(id: int) {.thread.} =
   for i in 0 ..< 1000:
-    state.update(proc(m: Map[int, string]): Map[int, string] =
+    state.update(proc(m: TrieMap[int, string]): TrieMap[int, string] =
       m.put(id * 1000 + i, $i))
 
 var ts: array[4, Thread[int]]
@@ -73,12 +73,12 @@ transient and rvalue optimizations automatically: filling a map in a loop
 with `[]=` (or `m = m.put(...)`) costs about the same as a mutable table.
 Once a version is shared, its nodes are path-copied.
 
-* `Map`: `initMap`, `toMap`, `len`, `contains`/`in`, `[]` (raises
+* `TrieMap`: `initTrieMap`, `toTrieMap`, `len`, `contains`/`in`, `[]` (raises
   `KeyError`), `getOrDefault`, `get` (`Option`), `[]=`, `del`, `put`,
   `erase`, `update`, `pairs`, `keys`, `values`, `==`, `hash`, `$`.
-* `Set`: `initSet`, `toSet`, `len`, `contains`, `incl`, `excl`, `insert`,
+* `TrieSet`: `initTrieSet`, `toTrieSet`, `len`, `contains`, `incl`, `excl`, `insert`,
   `erase`, `items`, `+`, `*`, `-`, `<=`, `==`, `hash`, `$`.
-* `Vector`: `initVector`, `toVector`, `len`, `[]` (also `^i`), `first`,
+* `TrieVec`: `initTrieVec`, `toTrieVec`, `len`, `[]` (also `^i`), `first`,
   `last`, `[]=`, `add`, `pop`, `pushBack`, `popBack`, `put`, `update`,
   `take`, `&`, `items`, `pairs`, `==`, `hash`, `$`.
 * `Box`: `box`, `[]`, `update`, `isEmpty`, `==`, `hash`, `$`.
@@ -107,6 +107,21 @@ loop is safe.
 * Under ORC, reference cycles that pass through an thetos container are
   not collected. Persistent values cannot form cycles on their own.
 
+## Single-threaded builds
+
+Programs that never share thetos values between threads can build with
+`-d:thetosSingleThread`. Node reference counts then use plain integer
+operations instead of atomic ones. This removes nothing from the API
+except `Atom`, which fails to compile in this mode.
+
+On an Apple M3 Pro this made persistent updates of shared maps and sets
+about 20% faster and in-place vector `[]=` about 2 ns faster. Lookups,
+iteration and building a container you own alone barely changed.
+
+With the flag set, sharing any thetos value between threads is a data race.
+The compiler cannot detect it, so only use the flag when the whole program
+keeps thetos values on one thread.
+
 ## Not (yet) ported from immer
 
 `flex_vector` (RRB trees with O(log n) concatenation and slicing),
@@ -116,10 +131,11 @@ in-place updates), custom memory policies, and diffing.
 ## Development
 
 ```sh
-atlas install           # dependencies (none at the moment)
-nim test                # all tests with the default config (atomicArc)
-nim testAll             # arc, orc and atomicArc in debug and release
-nim r tests/tmap.nim    # one test file
+atlas install               # dependencies (none at the moment)
+nim test                    # all tests with the default config (atomicArc)
+nim testAll                 # arc, orc and atomicArc in debug and release
+nim testSingleThread        # container tests with -d:thetosSingleThread
+nim r tests/ttriemap.nim    # one test file
 ```
 
 `tests/tleaks.nim` builds with `-d:thetosTrackAllocs` and checks that

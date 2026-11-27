@@ -9,8 +9,9 @@
 - Install deps with Atlas: `atlas install`.
 - Do not use Nimble for dependency resolution in normal development; use Atlas and its generated `deps/` folder and `nim.cfg`.
 - Run all tests: `nim test`.
-- Run one test: `nim r tests/tmap.nim`.
+- Run one test: `nim r tests/ttriemap.nim`.
 - Run every memory manager (arc, orc, atomicArc): `nim testAll`.
+- Run container tests with plain refcounts: `nim testSingleThread`.
 
 ## Coding Style & Naming
 - Indentation: 2 spaces; no tabs.

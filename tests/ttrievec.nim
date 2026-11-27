@@ -1,5 +1,5 @@
 import std/[unittest, random]
-import thetos/vector
+import thetos/trievec
 
 type Counted = object ## Element that counts how often it is copied.
   id: int
@@ -14,7 +14,7 @@ proc `=dup`(src: Counted): Counted =
   inc copies
   Counted(id: src.id)
 
-proc checkModel[T](v: Vector[T], model: seq[T]) =
+proc checkModel[T](v: TrieVec[T], model: seq[T]) =
   check v.len == model.len
   var i = 0
   for x in v:
@@ -24,23 +24,23 @@ proc checkModel[T](v: Vector[T], model: seq[T]) =
   for j in 0 ..< model.len:
     check v[j] == model[j]
 
-suite "Vector":
+suite "TrieVec":
   test "empty vector":
-    let v = initVector[int]()
+    let v = initTrieVec[int]()
     check v.len == 0
     check $v == "[]"
     expect IndexDefect:
       discard v[0]
 
   test "push, set and pop keep versions":
-    var v = toVector([1, 2, 3])
+    var v = toTrieVec([1, 2, 3])
     let w = v.pushBack(4)
     v[0] = 10
     check v.len == 3 and w.len == 4
     check v[0] == 10 and w[0] == 1
     check w[^1] == 4
     let u = w.popBack()
-    check u == toVector([1, 2, 3])
+    check u == toTrieVec([1, 2, 3])
     check w.len == 4
     check w.put(1, 20)[1] == 20
     check w[1] == 2
@@ -53,9 +53,9 @@ suite "Vector":
   test "growth and shrink across tree levels":
     # 32 (tail only), 1056 (root overflow), 33824 (third level)
     const n = 40_000
-    var v = initVector[int]()
+    var v = initTrieVec[int]()
     var model: seq[int]
-    var snaps: seq[(Vector[int], seq[int])]
+    var snaps: seq[(TrieVec[int], seq[int])]
     for i in 0 ..< n:
       v.add(i)
       model.add(i)
@@ -72,9 +72,9 @@ suite "Vector":
 
   test "random edits agree with seq":
     var r = initRand(5)
-    var v = initVector[string]()
+    var v = initTrieVec[string]()
     var model: seq[string]
-    var snaps: seq[(Vector[string], seq[string])]
+    var snaps: seq[(TrieVec[string], seq[string])]
     for step in 0 ..< 30_000:
       let op = r.rand(9)
       if op < 5 or model.len == 0:
@@ -93,18 +93,18 @@ suite "Vector":
       checkModel(s, m)
 
   test "take, concat, equality and hash":
-    let v = toVector([1, 2, 3, 4, 5])
-    check v.take(2) == toVector([1, 2])
-    check v & toVector([6]) == toVector([1, 2, 3, 4, 5, 6])
-    check hash(v) == hash(toVector([1, 2, 3, 4, 5]))
-    check $toVector(["a"]) == "[\"a\"]"
+    let v = toTrieVec([1, 2, 3, 4, 5])
+    check v.take(2) == toTrieVec([1, 2])
+    check v & toTrieVec([6]) == toTrieVec([1, 2, 3, 4, 5, 6])
+    check hash(v) == hash(toTrieVec([1, 2, 3, 4, 5]))
+    check $toTrieVec(["a"]) == "[\"a\"]"
     var total = 0
     for i, x in v:
       total += i * x
     check total == 0 * 1 + 1 * 2 + 2 * 3 + 3 * 4 + 4 * 5
 
   test "pop moves elements out of an unshared vector":
-    var v = initVector[Counted]()
+    var v = initTrieVec[Counted]()
     for i in 0 ..< 100: # spans tree leaves and the tail
       v.add(Counted(id: i))
     copies = 0
@@ -113,7 +113,7 @@ suite "Vector":
     check copies == 0
 
   test "pop from a shared vector leaves the original":
-    var a = initVector[seq[int]]()
+    var a = initTrieVec[seq[int]]()
     for i in 0 ..< 100:
       a.add(@[i])
     var b = a

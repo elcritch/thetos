@@ -1,6 +1,6 @@
 ## Persistent (immutable) hash map, after `immer::map`.
 ##
-## `Map[K, V]` is a value type backed by a CHAMP hash trie with atomic
+## `TrieMap[K, V]` is a value type backed by a CHAMP hash trie with atomic
 ## reference counts. Copying a map is O(1) and shares all structure; an
 ## update copies only the path to the changed entry (O(log32 n)) and leaves
 ## every other copy untouched. Maps can be shared freely between threads:
@@ -15,7 +15,7 @@
 ## containers are; Nim `ref`s are only when compiled with `--mm:atomicArc`.
 
 runnableExamples:
-  var a = initMap[string, int]()
+  var a = initTrieMap[string, int]()
   a["one"] = 1
   let b = a.put("two", 2) # `a` is unchanged
   assert a.len == 1 and b.len == 2
@@ -30,44 +30,45 @@ type
     key: K
     value: V
 
-  Map*[K, V] = object ## Immutable, structurally shared hash map with value semantics.
+  TrieMap*[K, V] = object
+    ## Immutable, structurally shared hash map with value semantics.
     root: ChampPtr[MapEntry[K, V]]
     size: int
 
-proc `=destroy`*[K, V](m: Map[K, V]) =
+proc `=destroy`*[K, V](m: TrieMap[K, V]) =
   release(m.root)
 
-proc `=wasMoved`*[K, V](m: var Map[K, V]) =
+proc `=wasMoved`*[K, V](m: var TrieMap[K, V]) =
   m.root = nil
   m.size = 0
 
-proc `=dup`*[K, V](m: Map[K, V]): Map[K, V] =
+proc `=dup`*[K, V](m: TrieMap[K, V]): TrieMap[K, V] =
   if m.root != nil:
     retain(m.root)
   result.root = m.root
   result.size = m.size
 
-proc `=copy`*[K, V](dst: var Map[K, V], src: Map[K, V]) =
+proc `=copy`*[K, V](dst: var TrieMap[K, V], src: TrieMap[K, V]) =
   if src.root != nil:
     retain(src.root)
   `=destroy`(dst)
   dst.root = src.root
   dst.size = src.size
 
-proc initMap*[K, V](): Map[K, V] =
-  ## Returns an empty map. `default(Map[K, V])` is also empty.
+proc initTrieMap*[K, V](): TrieMap[K, V] =
+  ## Returns an empty map. `default(TrieMap[K, V])` is also empty.
   discard
 
-proc len*[K, V](m: Map[K, V]): int {.inline.} =
+proc len*[K, V](m: TrieMap[K, V]): int {.inline.} =
   m.size
 
-proc findEntry[K, V](m: Map[K, V], key: K): ptr MapEntry[K, V] {.inline.} =
+proc findEntry[K, V](m: TrieMap[K, V], key: K): ptr MapEntry[K, V] {.inline.} =
   champFind(m.root, key, keyHash(key))
 
-proc contains*[K, V](m: Map[K, V], key: K): bool =
+proc contains*[K, V](m: TrieMap[K, V], key: K): bool =
   m.findEntry(key) != nil
 
-proc hasKey*[K, V](m: Map[K, V], key: K): bool =
+proc hasKey*[K, V](m: TrieMap[K, V], key: K): bool =
   m.findEntry(key) != nil
 
 proc raiseKeyError[K](key: K) {.noinline, noreturn.} =
@@ -76,48 +77,48 @@ proc raiseKeyError[K](key: K) {.noinline, noreturn.} =
   else:
     raise newException(KeyError, "key not found")
 
-proc `[]`*[K, V](m: Map[K, V], key: K): lent V =
+proc `[]`*[K, V](m: TrieMap[K, V], key: K): lent V =
   ## Returns the value for `key`. Raises `KeyError` if it is missing.
   let e = m.findEntry(key)
   if e == nil:
     raiseKeyError(key)
   e.value
 
-proc getOrDefault*[K, V](m: Map[K, V], key: K, def: V = default(V)): V =
+proc getOrDefault*[K, V](m: TrieMap[K, V], key: K, def: V = default(V)): V =
   let e = m.findEntry(key)
   if e == nil: def else: e.value
 
-proc get*[K, V](m: Map[K, V], key: K): Option[V] =
+proc get*[K, V](m: TrieMap[K, V], key: K): Option[V] =
   let e = m.findEntry(key)
   if e == nil:
     none(V)
   else:
     some(e.value)
 
-proc `[]=`*[K, V](m: var Map[K, V], key: K, value: sink V) =
+proc `[]=`*[K, V](m: var TrieMap[K, V], key: K, value: sink V) =
   ## Sets `key` in this map value only; other copies are not affected.
   let h = keyHash(key)
   if champInsert(m.root, 0, h, MapEntry[K, V](key: key, value: value)):
     inc m.size
 
-proc del*[K, V](m: var Map[K, V], key: K) =
+proc del*[K, V](m: var TrieMap[K, V], key: K) =
   ## Removes `key` from this map value if present.
   let h = keyHash(key)
   if champFind(m.root, key, h) != nil:
     champErase(m.root, 0, h, key)
     dec m.size
 
-proc put*[K, V](m: sink Map[K, V], key: K, value: sink V): Map[K, V] =
+proc put*[K, V](m: sink TrieMap[K, V], key: K, value: sink V): TrieMap[K, V] =
   ## Returns a map with `key` set to `value`.
   result = m
   result[key] = value
 
-proc erase*[K, V](m: sink Map[K, V], key: K): Map[K, V] =
+proc erase*[K, V](m: sink TrieMap[K, V], key: K): TrieMap[K, V] =
   ## Returns a map without `key`.
   result = m
   result.del(key)
 
-proc update*[K, V, F](m: sink Map[K, V], key: K, f: F): Map[K, V] =
+proc update*[K, V, F](m: sink TrieMap[K, V], key: K, f: F): TrieMap[K, V] =
   ## Returns a map where `key` maps to `f(old)`; `old` is `default(V)` when
   ## the key is missing.
   result = m
@@ -129,26 +130,26 @@ proc update*[K, V, F](m: sink Map[K, V], key: K, f: F): Map[K, V] =
       f(e.value)
   result[key] = next
 
-proc toMap*[K, V](pairs: openArray[(K, V)]): Map[K, V] =
+proc toTrieMap*[K, V](pairs: openArray[(K, V)]): TrieMap[K, V] =
   for (k, v) in pairs:
     result[k] = v
 
-iterator pairs*[K, V](m: Map[K, V]): (K, V) =
+iterator pairs*[K, V](m: TrieMap[K, V]): (K, V) =
   let keep = `=dup`(m) # iterate a snapshot even if `m` is reassigned
   for e in champEntries(keep.root):
     yield (e.key, e.value)
 
-iterator keys*[K, V](m: Map[K, V]): lent K =
+iterator keys*[K, V](m: TrieMap[K, V]): lent K =
   let keep = `=dup`(m)
   for e in champEntries(keep.root):
     yield e.key
 
-iterator values*[K, V](m: Map[K, V]): lent V =
+iterator values*[K, V](m: TrieMap[K, V]): lent V =
   let keep = `=dup`(m)
   for e in champEntries(keep.root):
     yield e.value
 
-proc `==`*[K, V](a, b: Map[K, V]): bool =
+proc `==`*[K, V](a, b: TrieMap[K, V]): bool =
   if a.root == b.root:
     return true
   if a.size != b.size:
@@ -159,14 +160,14 @@ proc `==`*[K, V](a, b: Map[K, V]): bool =
       return false
   true
 
-proc hash*[K, V](m: Map[K, V]): Hash =
+proc hash*[K, V](m: TrieMap[K, V]): Hash =
   ## Order-independent hash of all entries.
   var acc: uint = 0
   for e in champEntries(m.root):
     acc = acc + cast[uint](!$(hash(e.key) !& hash(e.value)))
   cast[Hash](acc)
 
-proc `$`*[K, V](m: Map[K, V]): string =
+proc `$`*[K, V](m: TrieMap[K, V]): string =
   if m.len == 0:
     return "{:}"
   result = "{"
@@ -180,6 +181,6 @@ proc `$`*[K, V](m: Map[K, V]): string =
     result.addQuoted e.value
   result.add "}"
 
-proc depth*[K, V](m: Map[K, V]): int =
+proc depth*[K, V](m: TrieMap[K, V]): int =
   ## Trie depth; useful for diagnostics.
   champDepth(m.root)

@@ -1,5 +1,5 @@
 import std/unittest
-import thetos/[atom, hashmap, vector]
+import thetos/[atom, triemap, trievec]
 
 type Counted = object ## Element that counts how often it is copied.
   id: int
@@ -22,15 +22,15 @@ suite "Atom":
     check a.load() == 5
 
   test "store, exchange and update":
-    var a = initAtom(toMap({"a": 1}))
+    var a = initAtom(toTrieMap({"a": 1}))
     let snap = a.load()
     a.store(snap.put("b", 2))
     check snap.len == 1
     check a.load().len == 2
-    let old = a.exchange(initMap[string, int]())
+    let old = a.exchange(initTrieMap[string, int]())
     check old.len == 2
     let now = a.update(
-      proc(m: Map[string, int]): Map[string, int] =
+      proc(m: TrieMap[string, int]): TrieMap[string, int] =
         m.put("c", 3)
     )
     check now.len == 1
@@ -47,10 +47,10 @@ suite "Atom":
     check held.id == 2
 
   test "atom of vector":
-    var a = initAtom(toVector([1]))
+    var a = initAtom(toTrieVec([1]))
     for i in 2 .. 100:
       a.update(
-        proc(v: Vector[int]): Vector[int] =
+        proc(v: TrieVec[int]): TrieVec[int] =
           v.pushBack(i)
       )
     check a.load().len == 100
