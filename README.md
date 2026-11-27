@@ -60,6 +60,11 @@ transient and rvalue optimizations automatically: filling a map in a loop
 with `[]=` (or `m = m.put(...)`) costs about the same as a mutable table.
 Once a version is shared, its nodes are path-copied.
 
+Every `update` that takes a function also has an `updateIt` template that
+takes an expression of `it` instead, like `mapIt` in `std/sequtils`:
+`m.updateIt("hits", it + 1)`, `v.updateIt(2, it * 10)`,
+`counter.updateIt(it + 1)`.
+
 Iterators walk a snapshot, so reassigning the source variable inside the
 loop is safe.
 
@@ -114,8 +119,8 @@ assert "changed 2: two -> deux" in changes
 ```
 
 API: `initTrieMap`, `toTrieMap`, `len`, `contains`/`in`, `hasKey`, `[]`,
-`getOrDefault`, `get`, `[]=`, `del`, `put`, `erase`, `update`, `pairs`,
-`keys`, `values`, `diff`, `==`, `hash`, `$`.
+`getOrDefault`, `get`, `[]=`, `del`, `put`, `erase`, `update`, `updateIt`,
+`pairs`, `keys`, `values`, `diff`, `==`, `hash`, `$`.
 
 ## TrieSet
 
@@ -177,7 +182,7 @@ assert sum == 2 + 6
 
 API: `initTrieVec`, `toTrieVec`, `len`, `high`, `low`, `[]` (also `^i`),
 `first`, `last`, `[]=`, `add`, `pop`, `pushBack`, `popBack`, `put`,
-`update`, `take`, `&`, `items`, `pairs`, `==`, `hash`, `$`.
+`update`, `updateIt`, `take`, `&`, `items`, `pairs`, `==`, `hash`, `$`.
 
 ## FlexVec
 
@@ -244,7 +249,7 @@ assert a[].limits.len == 3 and c[].limits.len == 4
 assert default(Box[int]).isEmpty           # `[]` on an empty box raises
 ```
 
-API: `box`, `[]`, `update`, `isEmpty`, `==`, `hash`, `$`.
+API: `box`, `[]`, `update`, `updateIt`, `isEmpty`, `==`, `hash`, `$`.
 
 ## Atom
 
@@ -293,7 +298,7 @@ for d in diff(snapshot, current.load()):
 assert added == @[9]
 ```
 
-API: `initAtom`, `load`, `store`, `exchange`, `update`.
+API: `initAtom`, `load`, `store`, `exchange`, `update`, `updateIt`.
 
 ### AtomRef
 
@@ -334,8 +339,8 @@ assert settings.version == 1
 and the same compile-time check on what `T` may hold. `==` and `hash`
 compare which atom two handles refer to, not the values.
 
-API: `newAtomRef`, `load`, `store`, `exchange`, `update`, `version`,
-`refresh`, `isNil`, `==`, `hash`, `$`.
+API: `newAtomRef`, `load`, `store`, `exchange`, `update`, `updateIt`,
+`version`, `refresh`, `isNil`, `==`, `hash`, `$`.
 
 ## Thread-safety contract
 

@@ -128,3 +128,13 @@ suite "TrieVec":
 
 suite "TrieVec exception safety":
   vectorCopyTests(toTrieVec)
+
+suite "TrieVec updateIt":
+  test "updates one element":
+    var v: TrieVec[int]
+    for i in 0 ..< 100:
+      v.add i
+    let w = v.updateIt(70, it * 10)
+    check v[70] == 70 and w[70] == 700 and w[69] == 69
+    expect IndexDefect:
+      discard v.updateIt(100, it)

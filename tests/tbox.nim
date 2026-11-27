@@ -30,3 +30,11 @@ suite "Box":
     check e.isEmpty
     expect ValueError:
       discard e[]
+
+suite "Box updateIt":
+  test "updates with an expression of it":
+    let a = box(@[1, 2, 3])
+    let b = a.updateIt(it & 4)
+    check a[] == @[1, 2, 3] and b[] == @[1, 2, 3, 4]
+    expect ValueError:
+      discard default(Box[int]).updateIt(it + 1)

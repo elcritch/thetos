@@ -218,6 +218,15 @@ proc update*[T, F](a: var Atom[T], f: F): T {.discardable.} =
         return
     retireCell[T](packCell(next))
 
+template updateIt*[T](a: var Atom[T], op: untyped): untyped =
+  ## Like `update`, with the new value given as an expression of `it`, the
+  ## current value: `counter.updateIt(it + 1)`. `op` may be evaluated
+  ## several times under contention, so it should be free of side effects.
+  a.update(
+    proc(it {.inject.}: T): T =
+      op
+  )
+
 # AtomRef -----------------------------------------------------------------
 
 type
@@ -303,6 +312,14 @@ proc update*[T, F](r: AtomRef[T], f: F): T {.discardable.} =
   ## value, like `Atom.update`. `f` may run several times under contention.
   result = target(r).update(f)
   published(r)
+
+template updateIt*[T](r: AtomRef[T], op: untyped): untyped =
+  ## Like `update`, with the new value given as an expression of `it`, the
+  ## current value. `op` may be evaluated several times under contention.
+  r.update(
+    proc(it {.inject.}: T): T =
+      op
+  )
 
 proc version*[T](r: AtomRef[T]): int =
   ## Number of stores so far. Read it before `load`ing to know that the

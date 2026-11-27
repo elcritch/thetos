@@ -55,6 +55,14 @@ proc update*[T, F](b: sink Box[T], f: F): Box[T] =
   else:
     result = box(f(b[]))
 
+template updateIt*[T](b: Box[T], op: untyped): Box[T] =
+  ## Like `update`, with the new value given as an expression of `it`, the
+  ## boxed value: `numbers.updateIt(it & 4)`. Raises `ValueError` for an
+  ## empty box.
+  block:
+    let it {.inject.} = b[]
+    box(op)
+
 proc `==`*[T](a, b: Box[T]): bool =
   if a.node == b.node:
     return true

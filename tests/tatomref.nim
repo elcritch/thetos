@@ -117,3 +117,10 @@ suite "AtomRef":
     )
     check res.exitCode != 0
     check "holds Nim refs or closures" in res.output
+
+suite "AtomRef updateIt":
+  test "updates with an expression of it and bumps the version":
+    let r = newAtomRef(toTrieMap({"hits": 0}))
+    let copy = r
+    copy.updateIt(it.put("hits", it["hits"] + 1))
+    check r.load()["hits"] == 1 and r.version == 1

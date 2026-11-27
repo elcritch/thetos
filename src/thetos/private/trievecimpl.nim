@@ -312,6 +312,17 @@ proc update*[T, F](v: sink TrieVec[T], i: Natural, f: F): TrieVec[T] =
     let next = f(result[i])
     result[i] = next
 
+template updateIt*[T](v: TrieVec[T], i: Natural, op: untyped): TrieVec[T] =
+  ## Like `update`, with the new element given as an expression of `it`,
+  ## the current element: `v.updateIt(2, it * 10)`.
+  block:
+    var updated = v
+    let index = i
+    resetOnError(updated):
+      let it {.inject.} = updated[index]
+      updated[index] = op
+    updated
+
 proc take*[T](v: sink TrieVec[T], n: Natural): TrieVec[T] =
   ## Returns the first `n` elements.
   result = v

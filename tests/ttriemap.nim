@@ -315,3 +315,10 @@ suite "TrieMap diff":
       inc n
     check n == 2
     check keyCompares < 100
+
+suite "TrieMap updateIt":
+  test "updates present and missing keys":
+    let m = toTrieMap({"hits": 1})
+    let n = m.updateIt("hits", it + 1).updateIt("misses", it + 5)
+    check m["hits"] == 1 and "misses" notin m
+    check n["hits"] == 2 and n["misses"] == 5 # missing keys start at default(V)

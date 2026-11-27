@@ -113,6 +113,17 @@ proc update*[K, V, F](m: sink TrieMap[K, V], key: K, f: F): TrieMap[K, V] =
       f(e.value)
   result[key] = next
 
+template updateIt*[K, V](m: TrieMap[K, V], key: K, op: untyped): TrieMap[K, V] =
+  ## Like `update`, with the new value given as an expression of `it`, the
+  ## current value (`default(V)` when `key` is missing):
+  ## `m.updateIt("hits", it + 1)`.
+  block:
+    var updated = m
+    let updateKey = key
+    let it {.inject.} = updated.getOrDefault(updateKey)
+    updated[updateKey] = op
+    updated
+
 proc toTrieMap*[K, V](pairs: openArray[(K, V)]): TrieMap[K, V] =
   for (k, v) in pairs:
     result[k] = v

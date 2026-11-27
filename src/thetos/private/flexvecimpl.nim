@@ -698,6 +698,17 @@ proc update*[T, F](v: sink FlexVec[T], i: Natural, f: F): FlexVec[T] =
     let next = f(result[i])
     result[i] = next
 
+template updateIt*[T](v: FlexVec[T], i: Natural, op: untyped): FlexVec[T] =
+  ## Like `update`, with the new element given as an expression of `it`,
+  ## the current element: `v.updateIt(2, it * 10)`.
+  block:
+    var updated = v
+    let index = i
+    resetOnError(updated):
+      let it {.inject.} = updated[index]
+      updated[index] = op
+    updated
+
 proc take*[T](v: sink FlexVec[T], n: Natural): FlexVec[T] =
   ## Returns the first `n` elements, in O(log n).
   result = v

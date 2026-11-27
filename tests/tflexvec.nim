@@ -333,3 +333,9 @@ suite "FlexVec exception safety":
           discard w.checkInvariants()
         check v == snapshot
       check failures > 0
+
+suite "FlexVec updateIt":
+  test "updates one element of a concatenated vector":
+    let v = toFlexVec([1, 2, 3]) & toFlexVec([4, 5])
+    let w = v.updateIt(3, it * 10)
+    check v[3] == 4 and w[3] == 40 and w.len == 5
