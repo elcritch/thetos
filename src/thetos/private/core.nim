@@ -31,6 +31,17 @@ proc allocRaw*(size: int): pointer {.inline.} =
   else:
     alloc0(size)
 
+proc allocRawUninit*(size: int): pointer {.inline.} =
+  ## Allocation from the shared heap that is not zeroed. The caller must
+  ## initialize every field it reads.
+  when defined(thetosTrackAllocs):
+    discard liveAllocs.fetchAdd(1, moRelaxed)
+    discard totalAllocs.fetchAdd(1, moRelaxed)
+  when compileOption("threads"):
+    allocShared(size)
+  else:
+    alloc(size)
+
 proc freeRaw*(p: pointer) {.inline.} =
   when defined(thetosTrackAllocs):
     discard liveAllocs.fetchSub(1, moRelaxed)

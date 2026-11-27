@@ -19,7 +19,7 @@ runnableExamples:
   assert b.insert(0, 0)[0] == 0
   assert b.erase(4) == toFlexVec([1, 2, 3, 4])
 
-import std/[hashes, options]
+import std/[hashes, options, typetraits]
 import ./private/core
 import ./trievec
 

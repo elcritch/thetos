@@ -93,6 +93,9 @@ suite "holdsNimRefs":
     check holdsNimRefs(ref RootObj)
 
   test "thetos containers check their elements":
+    check not holdsNimRefs(ImmStr)
+    check not holdsNimRefs(FlexStr)
+    check not holdsNimRefs(TrieMap[ImmStr, FlexStr])
     check not holdsNimRefs(TrieMap[int, string])
     check not holdsNimRefs(TrieSet[int])
     check not holdsNimRefs(TrieVec[TrieMap[string, seq[int]]])

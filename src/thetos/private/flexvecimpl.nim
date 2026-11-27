@@ -346,8 +346,25 @@ proc add*[T](v: var FlexVec[T], x: sink T) =
   inc v.size
 
 proc add*[T](v: var FlexVec[T], xs: openArray[T]) =
-  for x in xs:
-    appendCopy(v, x)
+  ## Appends every element of `xs` to this vector value only.
+  if xs.len > high(int) - v.size:
+    raiseFlexOverflow()
+  when supportsCopyMem(T):
+    # Plain data: fill the tail a leaf at a time.
+    var i = 0
+    while i < xs.len:
+      if v.tail != nil and v.tail.count < flexWidth and isUnique(v.tail):
+        let k = min(flexWidth - v.tail.count, xs.len - i)
+        copyMem(addr v.tail.elemArr[v.tail.count], unsafeAddr xs[i], k * sizeof(T))
+        v.tail.count += k
+        v.size += k
+        i += k
+      else:
+        v.add(xs[i]) # allocates, pushes or unshares the tail
+        inc i
+  else:
+    for x in xs:
+      appendCopy(v, x)
 
 proc assocRec[T](slot: var FlexPtr[T], s, idx: int, value: var T) =
   ensureOwned(slot)
@@ -742,8 +759,7 @@ proc `[]`*[T; U, V: Ordinal](v: FlexVec[T], s: HSlice[U, V]): FlexVec[T] =
   ## Returns elements `s.a .. s.b` (`^i` indices allowed), in O(log n).
   let a = (when U is BackwardsIndex: v.size - int(s.a) else: int(s.a))
   let b = (when V is BackwardsIndex: v.size - int(s.b) else: int(s.b))
-  let count = b - a + 1
-  if count <= 0:
+  if b < a:
     return
   if a < 0 or a >= v.size:
     raiseIndex(a, v.size)
@@ -752,7 +768,7 @@ proc `[]`*[T; U, V: Ordinal](v: FlexVec[T], s: HSlice[U, V]): FlexVec[T] =
   result = v
   resetOnError(result):
     dropFront(result, a)
-    truncate(result, count)
+    truncate(result, b - a + 1)
 
 proc insert*[T](v: sink FlexVec[T], i: Natural, x: sink T): FlexVec[T] =
   ## Returns a vector with `x` inserted before element `i` (`i == len`
@@ -784,6 +800,48 @@ proc erase*[T](v: sink FlexVec[T], i: Natural): FlexVec[T] =
 proc toFlexVec*[T](xs: openArray[T]): FlexVec[T] =
   resetOnError(result):
     result.add(xs)
+
+type LeafCursor[T] = object
+  stack: array[16, tuple[node: FlexPtr[T], next: int]]
+  depth: int
+  tail: FlexPtr[T]
+
+proc descendLeft[T](c: var LeafCursor[T], subtree: FlexPtr[T]): FlexPtr[T] {.inline.} =
+  var node = subtree
+  while not node.leaf:
+    c.stack[c.depth] = (node, 1)
+    inc c.depth
+    node = node.childArr[0]
+  node
+
+proc firstLeaf[T](c: var LeafCursor[T], v: FlexVec[T]): FlexPtr[T] {.inline.} =
+  # The caller owns the vector throughout the walk.
+  if v.root == nil:
+    return v.tail
+  c.tail = v.tail
+  c.descendLeft(v.root)
+
+proc nextLeaf[T](c: var LeafCursor[T]): FlexPtr[T] {.inline.} =
+  while c.depth > 0:
+    let top = c.depth - 1
+    let (parent, next) = c.stack[top]
+    if next < parent.count:
+      inc c.stack[top].next
+      return c.descendLeft(parent.childArr[next])
+    dec c.depth
+  result = c.tail
+  c.tail = nil
+
+iterator chunks*[T](v: FlexVec[T]): (ptr UncheckedArray[T], int) =
+  ## Low-level: the elements in order, as contiguous runs of up to 32
+  ## (one leaf each), given as a read-only pointer and a length. Retain
+  ## the iterated version if a pointer is used after iteration.
+  let keep = `=dup`(v)
+  var c: LeafCursor[T]
+  var leaf = c.firstLeaf(keep)
+  while leaf != nil:
+    yield (leaf.elemArr, leaf.count)
+    leaf = c.nextLeaf()
 
 iterator items*[T](v: FlexVec[T]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned
@@ -821,6 +879,31 @@ proc `==`*[T](a, b: FlexVec[T]): bool =
     if not (x == b[i]):
       return false
     inc i
+  true
+
+proc `==`*(a, b: FlexVec[char]): bool =
+  if a.size != b.size:
+    return false
+  if a.root == b.root and a.tail == b.tail:
+    return true
+  var left, right: LeafCursor[char]
+  var x = left.firstLeaf(a)
+  var y = right.firstLeaf(b)
+  var i, j: int
+  while x != nil:
+    let n = min(x.count - i, y.count - j)
+    let p = addr x.elemArr[i]
+    let q = addr y.elemArr[j]
+    if p != q and not equalMem(p, q, n):
+      return false
+    i += n
+    j += n
+    if i == x.count:
+      x = left.nextLeaf()
+      i = 0
+    if j == y.count:
+      y = right.nextLeaf()
+      j = 0
   true
 
 proc hash*[T](v: FlexVec[T]): Hash =
