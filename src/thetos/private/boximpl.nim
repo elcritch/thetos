@@ -90,9 +90,9 @@ proc `$`*[T](b: Box[T]): string =
     s.add ")"
     s
 
-macro with*(b: Box, args: varargs[untyped]): untyped =
+macro copyWith*(b: Box, args: varargs[untyped]): untyped =
   ## Returns a box holding `b[]` with the named fields replaced, as in
-  ## `config.with(name = "prod", retries = 5)`. `b` is unchanged. The value
+  ## `config.copyWith(name = "prod", retries = 5)`. `b` is unchanged. The value
   ## is moved out rather than copied when `b` is not used afterwards and is
   ## the only owner. Field names and visibility are checked like ordinary
   ## field assignments. An empty box starts from `default(T)`.
@@ -102,14 +102,14 @@ macro with*(b: Box, args: varargs[untyped]): untyped =
       retries: int = 3
 
     let a = box(Config(name: "default"))
-    let b = a.with(name = "prod", retries = 5)
+    let b = a.copyWith(name = "prod", retries = 5)
     assert a[].name == "default" and b[].name == "prod" and b[].retries == 5
 
   let value = genSym(nskVar, "value")
   var body = newStmtList(newVarStmt(value, newCall(bindSym"unbox", b)))
   for arg in args:
     if arg.kind != nnkExprEqExpr:
-      error("`with` takes `field = value` arguments", arg)
+      error("`copyWith` takes `field = value` arguments", arg)
     body.add newAssignment(newDotExpr(value, arg[0]), arg[1])
   body.add newCall(bindSym"box", newCall(bindSym"move", value))
   result = newBlockStmt(body)

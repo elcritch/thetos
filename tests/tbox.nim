@@ -1,11 +1,11 @@
-import std/unittest
+import std/[unittest, with]
 when defined(thetosTestLocal):
   import thetos/local # the same tests, against the thread-local variants
 else:
   import thetos/box
 import ./fixtures/boxrecord
 
-type Counted = object ## Counts copies, to check `with` moves when it can.
+type Counted = object ## Counts copies, to check `copyWith` moves when it can.
   id: int
 
 var copies = 0
@@ -54,33 +54,33 @@ suite "Box":
     expect ValueError:
       discard e[]
 
-  test "with replaces fields and leaves the original":
+  test "copyWith replaces fields and leaves the original":
     let a = box(Record(id: 1, name: "a"))
-    let b = a.with(name = "b")
+    let b = a.copyWith(name = "b")
     check a.name == "a" and b.name == "b"
     check b.id == 1 and a.secretOf == 7 and b.secretOf == 7
-    let c = default(Box[Record]).with(id = 3) # starts from field defaults
+    let c = default(Box[Record]).copyWith(id = 3) # starts from field defaults
     check c.id == 3 and c.secretOf == 7
 
   test "boxAccessors follows field visibility":
     let r = box(Record(name: "r"))
     check r.name == "r" and r.id == 0
     check not compiles(r.secret) # private getter in boxrecord
-    check not compiles(r.with(secret = 1)) # private field
-    check not compiles(r.with(missing = 1))
+    check not compiles(r.copyWith(secret = 1)) # private field
+    check not compiles(r.copyWith(missing = 1))
     let round = box(Shape(kind: true, radius: 2.0))
     check round.kind and round.radius == 2.0
     check not compiles(round.hidden)
     expect FieldDefect:
       discard round.side
 
-  test "with moves the value when it can":
+  test "copyWith moves the value when it can":
     var a = box(Holder(item: Counted(id: 1), label: "x"))
     copies = 0
-    let shared = a.with(label = "y") # `a` is used below, so the value is copied
+    let shared = a.copyWith(label = "y") # `a` is used below, so the value is copied
     check copies == 1
     copies = 0
-    let moved = move(a).with(label = "z") # sole owner: moved, not copied
+    let moved = move(a).copyWith(label = "z") # sole owner: moved, not copied
     check copies == 0
     check shared.item.id == 1 and moved.label == "z"
 
@@ -94,3 +94,15 @@ suite "Box":
     check unbox(move only).id == 6
     check copies == 0
     check unbox(default(Box[int])) == 0
+
+  test "std/with still works on a Box":
+    # `copyWith` was named to avoid this clash with std/with's `with`.
+    var calls = 0
+    proc touch(b: Box[Record]) =
+      calls += b.id
+
+    let r = box(Record(id: 2))
+    with r:
+      touch()
+      touch()
+    check calls == 4

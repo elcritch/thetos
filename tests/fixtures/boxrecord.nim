@@ -1,4 +1,4 @@
-## Record types for tbox.nim's cross-module `with` and `boxAccessors` tests.
+## Record types for tbox.nim's cross-module `copyWith` and `boxAccessors` tests.
 when defined(thetosTestLocal):
   import thetos/local
 else:

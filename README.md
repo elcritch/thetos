@@ -240,8 +240,8 @@ let a = box(Config(name: "default", limits: toTrieVec([1, 2])))
 let b = a                                 # O(1); both share one Config
 assert b.name == "default" and b.retries == 3
 
-# `with` returns a new box with some fields replaced; `a` is unchanged.
-let c = a.with(name = "prod", retries = 5)
+# `copyWith` returns a new box with some fields replaced; `a` is unchanged.
+let c = a.copyWith(name = "prod", retries = 5)
 assert a.name == "default" and c.name == "prod" and c.retries == 5
 
 # `update` applies a function to the whole value.
@@ -251,12 +251,12 @@ let d = c.update do (cfg: Config) -> Config:
 assert c.limits.len == 2 and d.limits.len == 3
 
 assert default(Box[int]).isEmpty           # `[]` on an empty box raises
-assert default(Box[Config]).with(name = "x").retries == 3   # starts from defaults
+assert default(Box[Config]).copyWith(name = "x").retries == 3   # starts from defaults
 ```
 
-`with` takes the value out of the box, assigns the named fields, and boxes
+`copyWith` takes the value out of the box, assigns the named fields, and boxes
 the result. When the box is not used afterwards and nothing else holds it,
-the value is moved rather than copied (`move(a).with(...)` forces this).
+the value is moved rather than copied (`move(a).copyWith(...)` forces this).
 Field names and visibility are checked as ordinary field assignments, so
 private fields stay private.
 
@@ -265,12 +265,12 @@ object type `T`, exported when the field is. Fields private to another
 module are skipped. Getters return `lent` references, except case-object
 fields, which are copied.
 
-Every `with` or `update` copies the whole value unless it can be moved, and
+Every `copyWith` or `update` copies the whole value unless it can be moved, and
 `seq`, `string` and `Table` fields are deep copies in Nim. Use `TrieVec`,
 `TrieMap` and the other thetos containers for large fields: they copy in
 O(1).
 
-API: `box`, `[]`, `with`, `update`, `unbox`, `isEmpty`, `boxAccessors`,
+API: `box`, `[]`, `copyWith`, `update`, `unbox`, `isEmpty`, `boxAccessors`,
 `==`, `hash`, `$`.
 
 ## Atom
