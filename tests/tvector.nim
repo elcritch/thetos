@@ -1,6 +1,19 @@
 import std/[unittest, random]
 import thetos/vector
 
+type Counted = object ## Element that counts how often it is copied.
+  id: int
+
+var copies = 0
+
+proc `=copy`(dst: var Counted, src: Counted) =
+  inc copies
+  dst.id = src.id
+
+proc `=dup`(src: Counted): Counted =
+  inc copies
+  Counted(id: src.id)
+
 proc checkModel[T](v: Vector[T], model: seq[T]) =
   check v.len == model.len
   var i = 0
@@ -89,6 +102,15 @@ suite "Vector":
     for i, x in v:
       total += i * x
     check total == 0 * 1 + 1 * 2 + 2 * 3 + 3 * 4 + 4 * 5
+
+  test "pop moves elements out of an unshared vector":
+    var v = initVector[Counted]()
+    for i in 0 ..< 100: # spans tree leaves and the tail
+      v.add(Counted(id: i))
+    copies = 0
+    for i in countdown(99, 0):
+      check v.pop().id == i
+    check copies == 0
 
   test "pop from a shared vector leaves the original":
     var a = initVector[seq[int]]()

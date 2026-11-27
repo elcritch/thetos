@@ -110,14 +110,19 @@ proc acquireCell[T](a: var Atom[T]): CellPtr[T] =
       break
   cell
 
+proc transferPending[T](cell: CellPtr[T], old: uint64) {.inline.} =
+  ## Moves the in-flight load reservations recorded in the swapped-out word
+  ## `old` into the cell's reference count.
+  let pending = int(old shr countShift)
+  if pending > 0:
+    discard cell.rc.fetchAdd(pending, moRelaxed)
+
 proc retireCell[T](old: uint64) =
   ## Releases the atom's reference to a cell that was swapped out by a
   ## successful exchange/CAS returning the word `old`.
   let cell = cellOf[T](old)
   if cell != nil:
-    let pending = int(old shr countShift)
-    if pending > 0:
-      discard cell.rc.fetchAdd(pending, moRelaxed)
+    transferPending(cell, old)
     releaseCell(cell)
 
 proc initAtom*[T](value: sink T): Atom[T] =
@@ -136,8 +141,13 @@ proc exchange*[T](a: var Atom[T], value: sink T): T =
   let old = a.word.exchange(packCell(newCell(value)), moAcquireRelease)
   let cell = cellOf[T](old)
   if cell != nil:
-    result = cell.value
-  retireCell[T](old)
+    transferPending(cell, old)
+    # Unique means no loader holds or has reserved the cell: take the value.
+    if isUnique(cell):
+      result = move(cell.value)
+    else:
+      result = cell.value
+    releaseCell(cell)
 
 proc store*[T](a: var Atom[T], value: sink T) =
   ## Replaces the value.

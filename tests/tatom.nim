@@ -1,6 +1,19 @@
 import std/unittest
 import thetos/[atom, hashmap, vector]
 
+type Counted = object ## Element that counts how often it is copied.
+  id: int
+
+var copies = 0
+
+proc `=copy`(dst: var Counted, src: Counted) =
+  inc copies
+  dst.id = src.id
+
+proc `=dup`(src: Counted): Counted =
+  inc copies
+  Counted(id: src.id)
+
 suite "Atom":
   test "default atom holds default value":
     var a: Atom[int]
@@ -22,6 +35,16 @@ suite "Atom":
     )
     check now.len == 1
     check a.load()["c"] == 3
+
+  test "exchange moves the old value out when unshared":
+    var a = initAtom(Counted(id: 1))
+    copies = 0
+    check a.exchange(Counted(id: 2)).id == 1
+    check copies == 0
+    let held = a.load() # one copy, and the cell is now shared
+    check copies == 1
+    check a.exchange(Counted(id: 3)).id == 2
+    check held.id == 2
 
   test "atom of vector":
     var a = initAtom(toVector([1]))

@@ -206,9 +206,10 @@ proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): b
     # Hash fragments collide at this level: push both entries down.
     let steal = isUnique(n)
     let src = n.entryArr
+    # Hash before moving: a raising user `hash` must leave the node intact.
+    let eh = keyHash(src[idx].key)
     var existing: E
     takeEntry(existing, src[idx], steal)
-    let eh = keyHash(existing.key)
     let sub = mergeTwo(existing, eh, e, h, shift + champBits)
     let fresh = allocChamp[E](ne - 1, nc + 1)
     fresh.datamap = n.datamap xor bit

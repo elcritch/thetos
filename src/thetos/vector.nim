@@ -276,7 +276,10 @@ proc pop*[T](v: var Vector[T]): T =
     dec v.size
     return
   # The tail holds one element: the last tree leaf becomes the new tail.
-  result = v.tail.elemArr[0]
+  if isUnique(v.tail):
+    result = move(v.tail.elemArr[0])
+  else:
+    result = v.tail.elemArr[0]
   release(v.tail)
   let newTail = v.leafFor(v.size - 2)
   retain(newTail)

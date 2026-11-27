@@ -10,6 +10,19 @@ proc hash(k: BadKey): Hash =
 proc `==`(a, b: BadKey): bool =
   a.id == b.id
 
+type FlakyKey = object ## Key whose hash raises on demand, to test exception safety.
+  id: int
+
+var flakyId = -1 # hashing this id raises
+
+proc hash(k: FlakyKey): Hash =
+  if k.id == flakyId:
+    raise newException(ValueError, "hash failed")
+  Hash(7) # all keys collide, forcing the existing entry to be rehashed
+
+proc `==`(a, b: FlakyKey): bool =
+  a.id == b.id
+
 proc checkModel[K, V](m: Map[K, V], model: Table[K, V]) =
   check m.len == model.len
   var seen = 0
@@ -129,6 +142,26 @@ suite "Map":
       if step mod 100 == 0:
         checkModel(m, model)
     checkModel(m, model)
+
+  test "a raising hash leaves the map intact":
+    for shared in [false, true]:
+      flakyId = -1
+      var m = initMap[FlakyKey, string]()
+      m[FlakyKey(id: 1)] = "one"
+      let snapshot =
+        if shared:
+          m
+        else:
+          initMap[FlakyKey, string]()
+      flakyId = 1 # rehashing the existing key 1 now raises
+      expect ValueError:
+        m[FlakyKey(id: 2)] = "two"
+      flakyId = -1
+      check m.len == 1
+      check m[FlakyKey(id: 1)] == "one"
+      check FlakyKey(id: 2) notin m
+      if shared:
+        check snapshot[FlakyKey(id: 1)] == "one"
 
   test "equality and hashing are order independent":
     var a, b: Map[int, string]
