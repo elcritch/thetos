@@ -14,6 +14,7 @@ proc testFiles(): seq[string] =
 # against thetos/local.
 const containerTests = ["tests/ttriemap.nim", "tests/ttrieset.nim", "tests/ttrievec.nim",
   "tests/tflexvec.nim", "tests/tbox.nim", "tests/timmstr.nim", "tests/tflexstr.nim"]
+const threadsOffTests = @containerTests & "tests/tjsonutils.nim"
 
 task test, "run unit tests":
   for testFile in testFiles():
@@ -26,14 +27,15 @@ task testAll, "run unit tests under arc, orc and atomicArc, debug and release":
       for testFile in testFiles():
         exec("nim c -r --hints:off --skipParentCfg --threads:on --mm:" & mm & " " &
           mode & " " & quoteShell(testFile))
-      for testFile in containerTests:
+      for testFile in threadsOffTests:
         exec("nim c -r --hints:off --skipParentCfg --threads:on --mm:" & mm & " " &
           mode & " --threads:off " & quoteShell(testFile))
+      for testFile in containerTests:
         exec("nim c -r --hints:off --skipParentCfg --threads:on --mm:" & mm & " " &
           mode & " -d:thetosTestLocal " & quoteShell(testFile))
 
 task testThreadsOff, "run container tests with --threads:off":
-  for testFile in containerTests:
+  for testFile in threadsOffTests:
     exec("nim c -r --threads:off " & quoteShell(testFile))
 
 task testLocal, "run container tests against thetos/local":

@@ -305,6 +305,39 @@ API: `toFlexStr`, `len`, `[]` (also `^i` and slices), `take`, `drop`, `&`,
 `add`, `insert`, `erase`, `replace`, `isEmpty`, `$`, `toImmStr`, `items`,
 `pairs`, `runes`, `runeLen`, `startsWith`, `endsWith`, `==`, `hash`.
 
+## Persistent JSON
+
+Import `thetos/jsonutils` for a persistent `JsonValue`. Its objects use
+`TrieMap`, arrays use `FlexVec`, and strings and object keys use `ImmStr`.
+Copying a value is O(1). Edits share unchanged subtrees with earlier
+versions. Object member order is unspecified.
+
+```nim
+import thetos/jsonutils
+
+let before = parseJsonValue("""{"items":[1,2]}""")
+let after = before.put("items", before["items"].pushBack(toJson(3)))
+assert before["items"].jsonTo(seq[int]) == @[1, 2]
+assert after["items"].jsonTo(seq[int]) == @[1, 2, 3]
+```
+
+`toJson`, `jsonTo`, and `fromJson` use the options and conversion hooks
+from `std/jsonutils`. Use `toJsonValue` and `toJsonNode` to convert between
+persistent values and independently mutable stdlib JSON trees.
+
+Importing `thetos/jsonutils` also makes its hooks available to the stdlib
+conversion procs. If both modules are imported, qualify the conversion
+procs with their module aliases. The hooks support the atomic and
+thread-local container types.
+
+| Type | JSON form |
+|---|---|
+| `ImmStr`, `FlexStr` | String |
+| `TrieVec`, `FlexVec`, `TrieSet` | Array. Set order is unspecified. |
+| `TrieMap` with `string`, `ImmStr`, or `FlexStr` keys | Object |
+| `TrieMap` with other key types | Array of `[key, value]` pairs |
+| `Box` | `[]` when empty, `[value]` when populated |
+
 ## Box
 
 `Box[T]` holds one immutable value behind a reference count. Copying a box
