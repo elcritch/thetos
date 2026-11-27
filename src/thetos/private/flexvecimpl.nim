@@ -167,8 +167,9 @@ proc relax[T](n: FlexPtr[T], s: int) =
   finishInner(n, s)
   n.relaxed = true
 
-proc clone[T](n: FlexPtr[T], count: int): FlexPtr[T] =
-  ## Copies the first `count` slots of `n`.
+proc clone[T](n: FlexPtr[T], count: int): FlexPtr[T] {.noinline.} =
+  ## Copies the first `count` slots of `n`. Kept out of line: inlined into
+  ## `ensureOwned` it slowed in-place `[]=` by about a third on amd64.
   if n.leaf:
     var leaf = allocFlexLeaf[T]()
     defer:
