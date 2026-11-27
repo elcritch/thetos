@@ -138,6 +138,12 @@ suite "FlexVec":
         discard full.pushBack(2)
       check full.len == high(int)
       check full.last == 1
+      var almostFull = full.take(high(int) - 1)
+      expect OverflowDefect:
+        almostFull.add([2, 3])
+      check almostFull.len == high(int) - 1 and almostFull.last == 1
+      expect IndexDefect:
+        discard v[0 .. high(int)]
 
   test "deep trees from repeated concatenation":
     var v = rangeVec(0, 37)

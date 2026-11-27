@@ -69,6 +69,7 @@ suite "ImmStr":
     check s.find('c') == 2 and s.find('c', 3) == 5
     check "cab" in s and 'z' notin s
     check s.startsWith("abc") and s.endsWith("cabc") and not s.endsWith("ab")
+    check s.find("bc", high(int)) == -1
     check s.find("") == 0 and s.startsWith("") and s.endsWith("")
 
   test "UTF-8":
@@ -87,6 +88,26 @@ suite "ImmStr":
       x.len
 
     check count(s.toOpenArray) == 5 and count(default(ImmStr).toOpenArray) == 0
+
+  test "byte views are read-only and evaluate the owner once":
+    var calls = 0
+    proc make(): ImmStr =
+      inc calls
+      toImmStr("a\0b")
+
+    proc matches(bytes: openArray[char]): bool =
+      bytes == ['a', '\0', 'b']
+
+    check matches(make().toOpenArray)
+    check calls == 1
+    static:
+      doAssert not compiles(
+        (
+          block:
+            let s = toImmStr("abc")
+            s.toOpenArray[0] = 'x'
+        )
+      )
 
   test "random strings round-trip":
     var r = initRand(3)

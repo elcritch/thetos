@@ -7,7 +7,7 @@ type
     rc*: RcCount # exported for the generic refcount helpers in core
     len: int
     hash: Atomic[int] ## cached on first use; 0 until then
-    # `len` bytes follow, then a NUL terminator.
+    data: UncheckedArray[char] ## `len` bytes followed by a NUL terminator.
 
   ImmStr* = object
     ## Immutable string with O(1) copies. Holds bytes like `string`, so
@@ -15,7 +15,7 @@ type
     node: ptr ImmStrNode
 
 template strBytes(n: ptr ImmStrNode): ptr UncheckedArray[char] =
-  cast[ptr UncheckedArray[char]](cast[uint](n) + uint(sizeof(ImmStrNode)))
+  addr n.data
 
 proc `=destroy`*(s: ImmStr) =
   if s.node != nil and dropRef(s.node):
@@ -63,14 +63,18 @@ proc low*(s: ImmStr): int {.inline.} =
 proc isEmpty*(s: ImmStr): bool {.inline.} =
   s.node == nil
 
-template toOpenArray*(s: ImmStr): untyped =
-  ## The bytes as an `openArray[char]`, without copying. Valid while `s`
-  ## is alive.
-  toOpenArray((if s.node == nil: nil else: s.node.strBytes), 0, s.len - 1)
+{.push experimental: "views".}
+proc toOpenArray*(s: ImmStr): openArray[char] {.inline.} =
+  ## A read-only view of the bytes, valid while the owner is alive.
+  if s.node == nil:
+    return "".toOpenArray(0, -1)
+  return s.node.strBytes.toOpenArray(0, s.node.len - 1)
+
+{.pop.}
 
 proc `[]`*(s: ImmStr, i: Natural): char {.inline.} =
   ## Byte `i`.
-  if i >= s.len:
+  if cast[uint](i) >= uint(s.len):
     raiseIndex(i, s.len)
   s.node.strBytes[i]
 
@@ -91,7 +95,7 @@ proc `[]`*[U, V: Ordinal](s: ImmStr, x: HSlice[U, V]): ImmStr =
   toImmStr(toOpenArray(s.node.strBytes, a, b))
 
 proc toCString*(s: ImmStr): cstring =
-  ## A NUL-terminated view of the bytes, without copying. Valid while `s`
+  ## A read-only, NUL-terminated view of the bytes, without copying. Valid while `s`
   ## is alive.
   if s.node == nil:
     cstring("")
@@ -210,7 +214,7 @@ proc find*(s: ImmStr, sub: openArray[char], start: Natural = 0): int =
   if sub.len == 0:
     return (if start <= s.len: int(start) else: -1)
   var i = int(start)
-  while i + sub.len <= s.len:
+  while i <= s.len - sub.len:
     if s.node.strBytes[i] == sub[0] and
         cmpMem(addr s.node.strBytes[i], unsafeAddr sub[0], sub.len) == 0:
       return i

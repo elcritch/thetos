@@ -347,6 +347,8 @@ proc add*[T](v: var FlexVec[T], x: sink T) =
 
 proc add*[T](v: var FlexVec[T], xs: openArray[T]) =
   ## Appends every element of `xs` to this vector value only.
+  if xs.len > high(int) - v.size:
+    raiseFlexOverflow()
   when supportsCopyMem(T):
     # Plain data: fill the tail a leaf at a time.
     var i = 0
@@ -757,8 +759,7 @@ proc `[]`*[T; U, V: Ordinal](v: FlexVec[T], s: HSlice[U, V]): FlexVec[T] =
   ## Returns elements `s.a .. s.b` (`^i` indices allowed), in O(log n).
   let a = (when U is BackwardsIndex: v.size - int(s.a) else: int(s.a))
   let b = (when V is BackwardsIndex: v.size - int(s.b) else: int(s.b))
-  let count = b - a + 1
-  if count <= 0:
+  if b < a:
     return
   if a < 0 or a >= v.size:
     raiseIndex(a, v.size)
@@ -767,7 +768,7 @@ proc `[]`*[T; U, V: Ordinal](v: FlexVec[T], s: HSlice[U, V]): FlexVec[T] =
   result = v
   resetOnError(result):
     dropFront(result, a)
-    truncate(result, count)
+    truncate(result, b - a + 1)
 
 proc insert*[T](v: sink FlexVec[T], i: Natural, x: sink T): FlexVec[T] =
   ## Returns a vector with `x` inserted before element `i` (`i == len`
@@ -802,8 +803,8 @@ proc toFlexVec*[T](xs: openArray[T]): FlexVec[T] =
 
 iterator chunks*[T](v: FlexVec[T]): (ptr UncheckedArray[T], int) =
   ## Low-level: the elements in order, as contiguous runs of up to 32
-  ## (one leaf each), given as a pointer and a length. The pointers stay
-  ## valid while the vector is alive.
+  ## (one leaf each), given as a read-only pointer and a length. Retain
+  ## the iterated version if a pointer is used after iteration.
   let keep = `=dup`(v)
   if keep.size > 0:
     if keep.root != nil:

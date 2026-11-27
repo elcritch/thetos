@@ -261,8 +261,8 @@ assert counts[toImmStr("wörld")] == 1
 
 Like `string`, an `ImmStr` holds bytes, so UTF-8 text works as usual:
 `len` and indexing count bytes, and `runes`, `runeLen` and `validateUtf8`
-work with code points. `toOpenArray` and `toCString` give views of the
-bytes without copying. Building a new string (`&`, slicing) copies; use
+work with code points. `toOpenArray` and `toCString` give read-only views
+of the bytes. Keep the owning `ImmStr` alive while using either view. Building a new string (`&`, slicing) copies; use
 `FlexStr` for long text that is edited often.
 
 API: `toImmStr`, `len`, `[]` (also `^i` and slices), `isEmpty`,

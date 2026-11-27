@@ -121,41 +121,31 @@ proc toImmStr*(s: FlexStr): ImmStr =
 
 iterator runes*(s: FlexStr): Rune =
   ## The UTF-8 code points.
-  var buf: array[4, char]
-  var have = 0
+  # std/unicode also recognizes legacy five- and six-byte lead bytes.
+  var buf: array[6, char]
+  var have, need: int
   for c in s.bytes:
     buf[have] = c
+    if have == 0:
+      need = runeLenAt(buf, 0)
     inc have
-    # The first byte of a sequence gives its length.
-    let first = uint8(buf[0])
-    let need =
-      if first < 0x80:
-        1
-      elif first shr 5 == 0b110:
-        2
-      elif first shr 4 == 0b1110:
-        3
-      elif first shr 3 == 0b11110:
-        4
-      else:
-        1 # invalid lead byte: yield it as one rune
-    if have >= need:
-      var i = 0
-      var r: Rune
-      fastRuneAt(toOpenArray(buf, 0, have - 1), i, r, true)
-      yield r
+    if have == need:
+      yield runeAt(buf, 0)
       have = 0
-  if have > 0: # truncated sequence at the end
-    var i = 0
+  var i = 0
+  while i < have:
     var r: Rune
-    fastRuneAt(toOpenArray(buf, 0, have - 1), i, r, true)
+    fastRuneAt(buf.toOpenArray(0, have - 1), i, r)
     yield r
 
 proc runeLen*(s: FlexStr): int =
-  ## Number of UTF-8 code points: bytes that do not continue a sequence.
-  for c in s.bytes:
-    if (uint8(c) and 0xC0) != 0x80:
+  ## Counts code points using the same lead-byte widths as std/unicode.
+  var i = 0
+  for (p, n) in s.bytes.chunks:
+    while i < n:
+      i += runeLenAt(p.toOpenArray(0, n - 1), i)
       inc result
+    i -= n
 
 proc `==`*(a, b: FlexStr): bool =
   ## Compares the bytes, a leaf at a time.
