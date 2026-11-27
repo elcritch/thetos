@@ -119,6 +119,16 @@ suite "FlexVec":
         discard v.checkInvariants()
     check v.len == 0
 
+  test "chunk iteration keeps its version alive during reassignment":
+    var v = rangeVec(0, 2100)
+    var seen = 0
+    for (p, n) in v.chunks:
+      v = default(FlexVec[int])
+      for i in 0 ..< n:
+        check p[i] == seen
+        inc seen
+    check seen == 2100
+
   test "appending past high(int) preserves shared vectors":
     checkNoLeaks:
       var v = toFlexVec([1])

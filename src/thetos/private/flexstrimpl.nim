@@ -98,7 +98,18 @@ proc replace*[U, V: Ordinal](
   ## A string with bytes `x.a .. x.b` replaced by `by`, in O(log n) plus
   ## the length of `by`.
   let a = (when U is BackwardsIndex: s.len - int(x.a) else: int(x.a))
-  s.erase(x).insert(a, by)
+  let b = (when V is BackwardsIndex: s.len - int(x.b) else: int(x.b))
+  if b < a:
+    return s.insert(a, by)
+  if a < 0 or a >= s.len:
+    raiseIndex(a, s.len)
+  if b >= s.len:
+    raiseIndex(b, s.len)
+  if a == b and by.len == 1:
+    return FlexStr(bytes: s.bytes.put(a, by[0]))
+  result = s.take(a)
+  result.add(by)
+  result.add(s.drop(b + 1))
 
 iterator items*(s: FlexStr): char =
   for c in s.bytes:
@@ -149,25 +160,7 @@ proc runeLen*(s: FlexStr): int =
 
 proc `==`*(a, b: FlexStr): bool =
   ## Compares the bytes, a leaf at a time.
-  if a.len != b.len:
-    return false
-  var other: seq[(ptr UncheckedArray[char], int)]
-  for chunk in b.bytes.chunks:
-    other.add chunk
-  var bi = 0 # chunk of `b`
-  var bo = 0 # offset in that chunk
-  for (p, n) in a.bytes.chunks:
-    var ao = 0
-    while ao < n:
-      let take = min(n - ao, other[bi][1] - bo)
-      if cmpMem(addr p[ao], addr other[bi][0][bo], take) != 0:
-        return false
-      ao += take
-      bo += take
-      if bo == other[bi][1]:
-        inc bi
-        bo = 0
-  true
+  a.bytes == b.bytes
 
 proc `==`*(a: FlexStr, b: openArray[char]): bool =
   if a.len != b.len:

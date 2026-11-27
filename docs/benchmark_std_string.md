@@ -90,14 +90,16 @@ Equal values in separate allocations.
 
 | Size | `string` | `ImmStr` | `FlexStr` |
 |---:|---:|---:|---:|
-| 16 B | 1.6 ns | 3.4 ns | 23.6 ns |
-| 1 KiB | 19.9 ns | 20.6 ns | 231.3 ns |
-| 64 KiB | 1311.3 ns | 1339.5 ns | 12574.4 ns |
+| 16 B | 1.6 ns | 3.5 ns | 7.3 ns |
+| 1 KiB | 20.2 ns | 21.1 ns | 103.5 ns |
+| 64 KiB | 1406.8 ns | 1367.5 ns | 6775.5 ns |
 
 `string` and `ImmStr` both compare one buffer with `memcmp`. `ImmStr`
 returns at once for two copies of the same value (same buffer), and rejects
-early when both hashes are cached and differ. `FlexStr` compares leaf by
-leaf.
+early when both hashes are cached and differ. `FlexStr` walks the two trees
+together and stops at the first unequal byte range. On separately allocated
+64 KiB values this took 6.78 µs, down from 13.16 µs when equality built a
+temporary list of leaves.
 
 ### Reading
 
@@ -143,15 +145,13 @@ versions (as an undo history would).
 
 | | `seq[string]` | `seq[FlexStr]` |
 |---|---:|---:|
-| Time per edit | 2387.1 ns | 3441.6 ns |
+| Time per edit | 2560.8 ns | 309.2 ns |
 | Memory held by all versions | 66.5 MiB | 1.8 MiB |
 
-At 64 KiB, copying a `string` per version is still slightly faster than a
-`FlexStr` edit (`replace` is an erase plus an insert), but it holds a full
-copy of the document per version. `FlexStr` versions share every leaf
-except the edited one, so memory grows with the number of edits rather
-than the document size, and the time per edit stays flat as documents grow
-(see the 1 MiB insert above).
+A one-byte replacement copies the edited leaf and the path leading to it.
+The other leaves are shared with the previous version. This reduced time
+per edit from 3.55 µs with erase followed by insert to 0.31 µs in the
+same benchmark. The timed loop includes maintaining the version history.
 
 ### Converting
 

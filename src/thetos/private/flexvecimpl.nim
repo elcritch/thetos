@@ -801,34 +801,47 @@ proc toFlexVec*[T](xs: openArray[T]): FlexVec[T] =
   resetOnError(result):
     result.add(xs)
 
+type LeafCursor[T] = object
+  stack: array[16, tuple[node: FlexPtr[T], next: int]]
+  depth: int
+  tail: FlexPtr[T]
+
+proc descendLeft[T](c: var LeafCursor[T], subtree: FlexPtr[T]): FlexPtr[T] {.inline.} =
+  var node = subtree
+  while not node.leaf:
+    c.stack[c.depth] = (node, 1)
+    inc c.depth
+    node = node.childArr[0]
+  node
+
+proc firstLeaf[T](c: var LeafCursor[T], v: FlexVec[T]): FlexPtr[T] {.inline.} =
+  # The caller owns the vector throughout the walk.
+  if v.root == nil:
+    return v.tail
+  c.tail = v.tail
+  c.descendLeft(v.root)
+
+proc nextLeaf[T](c: var LeafCursor[T]): FlexPtr[T] {.inline.} =
+  while c.depth > 0:
+    let top = c.depth - 1
+    let (parent, next) = c.stack[top]
+    if next < parent.count:
+      inc c.stack[top].next
+      return c.descendLeft(parent.childArr[next])
+    dec c.depth
+  result = c.tail
+  c.tail = nil
+
 iterator chunks*[T](v: FlexVec[T]): (ptr UncheckedArray[T], int) =
   ## Low-level: the elements in order, as contiguous runs of up to 32
   ## (one leaf each), given as a read-only pointer and a length. Retain
   ## the iterated version if a pointer is used after iteration.
   let keep = `=dup`(v)
-  if keep.size > 0:
-    if keep.root != nil:
-      if keep.shift == 0:
-        yield (keep.root.elemArr, keep.root.count)
-      else:
-        # Depth-first walk: each node is visited once.
-        var stack: array[16, tuple[node: FlexPtr[T], next: int]]
-        var sp = 0
-        stack[0] = (keep.root, 0)
-        while sp >= 0:
-          let node = stack[sp].node
-          let next = stack[sp].next
-          if next >= node.count:
-            dec sp
-            continue
-          stack[sp].next = next + 1
-          let child = node.childArr[next]
-          if child.leaf:
-            yield (child.elemArr, child.count)
-          else:
-            inc sp
-            stack[sp] = (child, 0)
-    yield (keep.tail.elemArr, keep.tail.count)
+  var c: LeafCursor[T]
+  var leaf = c.firstLeaf(keep)
+  while leaf != nil:
+    yield (leaf.elemArr, leaf.count)
+    leaf = c.nextLeaf()
 
 iterator items*[T](v: FlexVec[T]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned
@@ -866,6 +879,31 @@ proc `==`*[T](a, b: FlexVec[T]): bool =
     if not (x == b[i]):
       return false
     inc i
+  true
+
+proc `==`*(a, b: FlexVec[char]): bool =
+  if a.size != b.size:
+    return false
+  if a.root == b.root and a.tail == b.tail:
+    return true
+  var left, right: LeafCursor[char]
+  var x = left.firstLeaf(a)
+  var y = right.firstLeaf(b)
+  var i, j: int
+  while x != nil:
+    let n = min(x.count - i, y.count - j)
+    let p = addr x.elemArr[i]
+    let q = addr y.elemArr[j]
+    if p != q and not equalMem(p, q, n):
+      return false
+    i += n
+    j += n
+    if i == x.count:
+      x = left.nextLeaf()
+      i = 0
+    if j == y.count:
+      y = right.nextLeaf()
+      j = 0
   true
 
 proc hash*[T](v: FlexVec[T]): Hash =

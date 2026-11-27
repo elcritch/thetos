@@ -43,6 +43,28 @@ suite "FlexStr":
       expect IndexDefect:
         discard doc.insert(20, "x")
 
+  test "replace supports empty ranges, single bytes and edits across leaves":
+    let bytes = repeat("0123456789", 12)
+    let s = toFlexStr(bytes)
+    check s.replace(^1 .. ^1, "!") == bytes[0 ..< bytes.high] & "!"
+    check s.replace(31 .. 64, "xy") == bytes[0 ..< 31] & "xy" & bytes[65 .. ^1]
+    check s.replace(32 .. 31, "xy") == bytes[0 ..< 32] & "xy" & bytes[32 .. ^1]
+    check s.replace(0 .. ^1, "").isEmpty
+    check default(FlexStr).replace(0 ..< 0, "abc") == "abc"
+    expect IndexDefect:
+      discard s.replace(s.len .. s.len, "x")
+    check s == bytes
+
+  test "equality follows bytes across different leaf boundaries":
+    let bytes = repeat("pattern", 650)
+    let a = toFlexStr(bytes)
+    let b = toFlexStr("shift" & bytes).drop(5)
+    check a == a and a == b and b == a
+    check hash(a) == hash(b)
+    for i in [0, 26, 31, 32, 1023, bytes.high]:
+      check a != b.replace(i .. i, "!")
+    check a != b.take(b.len - 1)
+
   test "random edits agree with string":
     var r = initRand(11)
     checkNoLeaks:
