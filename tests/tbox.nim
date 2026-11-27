@@ -1,5 +1,8 @@
 import std/unittest
-import thetos/box
+when defined(thetosTestLocal):
+  import thetos/local # the same tests, against the thread-local variants
+else:
+  import thetos/box
 
 suite "Box":
   test "shares and updates":

@@ -35,13 +35,6 @@ runnableExamples:
   )
   assert counts.load()["hits"] == 1
 
-when defined(thetosSingleThread):
-  {.
-    error:
-      "thetos/atom shares values between threads and cannot be used " &
-      "with -d:thetosSingleThread"
-  .}
-
 import std/[atomics, typetraits]
 import ./private/[core, reftraits]
 
@@ -78,7 +71,14 @@ template packCell(p: pointer): uint64 =
 template checkShareable(T: typedesc) =
   # arc/orc count refs and closures non-atomically, and every `load`
   # copies the value from whichever thread calls it.
-  when compileOption("threads") and not defined(gcAtomicArc) and
+  when compileOption("threads") and holdsLocalContainers(T):
+    {.
+      error:
+        "Atom[" & name(T) & "] holds thread-local containers from " &
+        "thetos/local, whose reference counts are not atomic. Use the " &
+        "containers from thetos for values shared between threads."
+    .}
+  elif compileOption("threads") and not defined(gcAtomicArc) and
       not defined(thetosUnsafeRefAtom) and holdsNimRefs(T):
     {.
       error:

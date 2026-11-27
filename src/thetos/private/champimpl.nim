@@ -1,5 +1,5 @@
-## CHAMP (Compressed Hash-Array Mapped Prefix-tree) core shared by `TrieMap`
-## and `TrieSet`.
+## CHAMP (Compressed Hash-Array Mapped Prefix-tree) core shared by `TrieMap` and
+## `TrieSet`. Included, not imported: see the note below.
 ##
 ## Each node is one shared-heap block laid out as:
 ##
@@ -17,24 +17,25 @@
 ## immutable, and is safe across threads because a refcount of 1 proves no
 ## other owner exists.
 
-import std/[atomics, bitops]
-import ./core
+# Included by the container modules and by `thetos/local`; not a module.
+# The including module imports `std/[bitops, hashes, options]` and
+# `private/core`, and declares `RcCount`, the type of each node's `rc`.
 
 const
   champBits = 5
   champMask = 31'u64
   hashBits = 64
-  maxChampDepth* = hashBits div champBits + 2
+  maxChampDepth = hashBits div champBits + 2
 
 type
-  ChampNode*[E] = object
-    rc*: Atomic[int] # exported for the generic refcount helpers in core
+  ChampNode[E] = object
+    rc*: RcCount # exported for the generic refcount helpers in core
     datamap: uint32
     nodemap: uint32
     nentries: uint32
     nchildren: uint32
 
-  ChampPtr*[E] = ptr ChampNode[E]
+  ChampPtr[E] = ptr ChampNode[E]
 
 template entryOffset(E: typedesc, nchildren: int): int =
   alignUp(sizeof(ChampNode[E]) + nchildren * sizeof(pointer), alignof(E))
@@ -59,7 +60,7 @@ proc allocChamp[E](nentries, nchildren: int): ChampPtr[E] =
     doAssert alignof(E) <= 16, "entry alignment above 16 is unsupported"
   let size = entryOffset(E, nchildren) + nentries * sizeof(E)
   result = cast[ChampPtr[E]](allocRaw(size))
-  result.rc.store(1, moRelaxed)
+  initRc(result)
   result.nentries = uint32(nentries)
   result.nchildren = uint32(nchildren)
 
@@ -69,7 +70,7 @@ template destroyEntry(e: untyped) =
   {.cast(raises: []), cast(gcsafe).}:
     `=destroy`(e)
 
-proc release*[E](n: ChampPtr[E]) {.raises: [], gcsafe.} =
+proc release[E](n: ChampPtr[E]) {.raises: [], gcsafe.} =
   ## Drops one reference, freeing the node and its subtree when it was the
   ## last one.
   if n != nil and dropRef(n):
@@ -127,7 +128,7 @@ proc replaceSlot[E](slot: var ChampPtr[E], fresh: ChampPtr[E], stolen: bool) =
     release(slot)
   slot = fresh
 
-proc champFind*[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E =
+proc champFind[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E =
   mixin `==`
   var n = root
   var shift = 0
@@ -173,7 +174,7 @@ proc mergeTwo[E](
     result.nodemap = 1'u32 shl fa
     result.childArr[0] = mergeTwo(a, ha, b, hb, shift + champBits)
 
-proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): bool =
+proc champInsert[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): bool =
   ## Inserts `e`, replacing an entry with an equal key. Returns true when
   ## the key was not present before.
   mixin `==`
@@ -264,7 +265,7 @@ proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): b
     replaceSlot(slot, move(fresh), steal)
     return true
 
-proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
+proc champErase[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
   ## Removes `key`. Precondition: `key` is present.
   mixin `==`
   let n = slot
@@ -351,7 +352,7 @@ proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
   freeRaw(owned)
   slot = fresh
 
-iterator champEntries*[E](root: ChampPtr[E]): ptr E =
+iterator champEntries[E](root: ChampPtr[E]): ptr E =
   ## Pre-order walk over every entry. The caller must keep `root` alive.
   if root != nil:
     var stack: array[maxChampDepth + 1, tuple[node: ChampPtr[E], next: int]]
@@ -372,7 +373,121 @@ iterator champEntries*[E](root: ChampPtr[E]): ptr E =
       else:
         dec sp
 
-proc champDepth*[E](root: ChampPtr[E]): int =
+type DiffFrame[E] = object
+  a, b: ChampPtr[E]
+  shift: int
+  pos: int ## next hash fragment to compare
+
+iterator champDiff[E](a, b: ChampPtr[E]): tuple[old, new: ptr E] =
+  ## Walks two tries in step and yields entries that may differ:
+  ## `(old, nil)` for keys only in `a`, `(nil, new)` for keys only in `b`,
+  ## and `(old, new)` for keys in both (the caller compares the rest of the
+  ## entry). Subtrees shared by both tries are skipped. Matching two
+  ## full-hash collision nodes can require comparing every pair of keys.
+  ## The caller must keep both roots alive.
+  mixin `==`
+  if a == b:
+    discard
+  elif a == nil:
+    for e in champEntries(b):
+      yield (nil, e)
+  elif b == nil:
+    for e in champEntries(a):
+      yield (e, nil)
+  else:
+    var stack: array[maxChampDepth + 1, DiffFrame[E]]
+    var sp = 0
+    stack[0] = DiffFrame[E](a: a, b: b)
+    while sp >= 0:
+      let x = stack[sp].a
+      let y = stack[sp].b
+      let shift = stack[sp].shift
+      if shift >= hashBits:
+        # Collision nodes: unordered entry lists with equal full hashes.
+        let xs = x.entryArr
+        let ys = y.entryArr
+        for i in 0 ..< int(x.nentries):
+          var match: ptr E = nil
+          for j in 0 ..< int(y.nentries):
+            if ys[j].key == xs[i].key:
+              match = addr ys[j]
+              break
+          yield (addr xs[i], match)
+        for j in 0 ..< int(y.nentries):
+          var found = false
+          for i in 0 ..< int(x.nentries):
+            if xs[i].key == ys[j].key:
+              found = true
+              break
+          if not found:
+            yield (nil, addr ys[j])
+        dec sp
+        continue
+      # Jump to the next hash fragment used by either node.
+      let used = x.datamap or x.nodemap or y.datamap or y.nodemap
+      let rest =
+        if stack[sp].pos >= 32:
+          0'u32
+        else:
+          used shr stack[sp].pos
+      if rest == 0:
+        dec sp
+        continue
+      let pos = stack[sp].pos + countTrailingZeroBits(rest)
+      stack[sp].pos = pos + 1
+      let bit = 1'u32 shl pos
+      let dataA = (x.datamap and bit) != 0
+      let dataB = (y.datamap and bit) != 0
+      let nodeA = (x.nodemap and bit) != 0
+      let nodeB = (y.nodemap and bit) != 0
+      if dataA and dataB:
+        let ea = addr x.entryArr[index(x.datamap, bit)]
+        let eb = addr y.entryArr[index(y.datamap, bit)]
+        if ea.key == eb.key:
+          yield (ea, eb)
+        else:
+          yield (ea, nil)
+          yield (nil, eb)
+      elif nodeA and nodeB:
+        let ca = x.childArr[index(x.nodemap, bit)]
+        let cb = y.childArr[index(y.nodemap, bit)]
+        if ca != cb:
+          inc sp
+          stack[sp] = DiffFrame[E](a: ca, b: cb, shift: shift + champBits)
+      elif dataA and nodeB:
+        let ea = addr x.entryArr[index(x.datamap, bit)]
+        var found = false
+        for eb in champEntries(y.childArr[index(y.nodemap, bit)]):
+          if not found and eb.key == ea.key:
+            found = true
+            yield (ea, eb)
+          else:
+            yield (nil, eb)
+        if not found:
+          yield (ea, nil)
+      elif nodeA and dataB:
+        let eb = addr y.entryArr[index(y.datamap, bit)]
+        var found = false
+        for ea in champEntries(x.childArr[index(x.nodemap, bit)]):
+          if not found and ea.key == eb.key:
+            found = true
+            yield (ea, eb)
+          else:
+            yield (ea, nil)
+        if not found:
+          yield (nil, eb)
+      elif dataA:
+        yield (addr x.entryArr[index(x.datamap, bit)], nil)
+      elif dataB:
+        yield (nil, addr y.entryArr[index(y.datamap, bit)])
+      elif nodeA:
+        for e in champEntries(x.childArr[index(x.nodemap, bit)]):
+          yield (e, nil)
+      elif nodeB:
+        for e in champEntries(y.childArr[index(y.nodemap, bit)]):
+          yield (nil, e)
+
+proc champDepth[E](root: ChampPtr[E]): int =
   ## Maximum node depth; for tests and diagnostics.
   if root == nil:
     return 0

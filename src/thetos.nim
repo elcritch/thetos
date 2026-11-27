@@ -4,6 +4,8 @@
 ## * `TrieMap[K, V] <thetos/triemap.html>`_: CHAMP hash map
 ## * `TrieSet[T] <thetos/trieset.html>`_: CHAMP hash set
 ## * `TrieVec[T] <thetos/trievec.html>`_: radix-balanced vector
+## * `FlexVec[T] <thetos/flexvec.html>`_: relaxed radix-balanced vector with
+##   O(log n) concatenation and slicing
 ## * `Box[T] <thetos/box.html>`_: shared immutable value
 ## * `Atom[T] <thetos/atom.html>`_: lock-free cell for publishing new
 ##   versions between threads
@@ -13,13 +15,11 @@
 ## so values can be passed between threads under `--mm:arc`, `orc` or
 ## `atomicArc` without locks.
 ##
-## Programs that never share thetos values between threads can build with
-## `-d:thetosSingleThread` to use plain, non-atomic reference counts. `Atom`
-## is not available in that mode.
+## `thetos/local <thetos/local.html>`_ has thread-local variants of the
+## containers (`local.TrieMap` and so on) with plain, non-atomic reference
+## counts, for values that never leave one thread. It is not exported from
+## this module. A program built with `--threads:off` cannot share values
+## between threads at all, so there every container uses plain counts.
 
-import thetos/[triemap, trieset, trievec, box]
-export triemap, trieset, trievec, box
-
-when not defined(thetosSingleThread):
-  import thetos/atom
-  export atom
+import thetos/[triemap, trieset, trievec, flexvec, box, atom]
+export triemap, trieset, trievec, flexvec, box, atom

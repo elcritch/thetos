@@ -1,11 +1,13 @@
 ## Shared low-level helpers: raw shared allocation, reference counts and
 ## hash mixing. Each node has an `rc` field for ownership tracking.
 ##
-## Reference counts are atomic by default. With `-d:thetosSingleThread` they
-## use plain integer operations instead, which is faster but makes it unsafe
-## to share any thetos value between threads.
+## The reference count helpers pick their operations from the type of a
+## node's `rc` field: `Atomic[int]` (or `Atomic[int64]`) uses atomic
+## operations, a plain `int` uses ordinary arithmetic. The containers in
+## `thetos` use `DefaultRc` (atomic unless built with `--threads:off`); the
+## ones in `thetos/local` always use `int`.
 
-import std/[atomics, hashes]
+import std/[atomics, hashes, typetraits]
 
 when defined(thetosTrackAllocs):
   var liveAllocs: Atomic[int]
@@ -58,46 +60,67 @@ proc freeAlignedRaw*(p: pointer, alignment: static int) {.inline.} =
   else:
     freeRaw(cast[ptr pointer](cast[uint](p) - uint(sizeof(pointer)))[])
 
-const thetosAtomicRc* = not defined(thetosSingleThread)
-  ## False when built with `-d:thetosSingleThread`.
+const thetosAtomicRc* = compileOption("threads")
+  ## False when built with `--threads:off`. A program without threads cannot
+  ## share values between threads, so plain counts are always safe there.
 
 when thetosAtomicRc:
-  proc retain*[N](n: ptr N) {.inline.} =
-    ## Adds an owner. The caller must already own a reference.
-    discard n[].rc.fetchAdd(1, moRelaxed)
+  type DefaultRc* = Atomic[int] ## reference count type of the `thetos` containers
+else:
+  type DefaultRc* = int
 
-  proc dropRef*[N](n: ptr N): bool {.inline.} =
-    ## Drops an owner. Returns true when the caller was the last owner and
-    ## must free the node.
+type DiffKind* = enum ## What happened to a key between two versions, from `diff`.
+  dkAdded ## only in the second version
+  dkRemoved ## only in the first version
+  dkChanged ## in both, with different values (maps only)
+
+proc initRc*[N](n: ptr N) {.inline.} =
+  ## Sets the reference count of a fresh node to one.
+  when n[].rc is Atomic:
+    n[].rc.store(1, moRelaxed)
+  else:
+    n[].rc = 1
+
+proc refCount*[N](n: ptr N): int {.inline.} =
+  ## Current reference count; for assertions and diagnostics.
+  when n[].rc is Atomic:
+    int(n[].rc.load(moRelaxed))
+  else:
+    n[].rc
+
+proc retain*[N](n: ptr N) {.inline.} =
+  ## Adds an owner. The caller must already own a reference.
+  when n[].rc is Atomic:
+    discard n[].rc.fetchAdd(1, moRelaxed)
+  else:
+    n[].rc = n[].rc +% 1
+
+proc dropRef*[N](n: ptr N): bool {.inline.} =
+  ## Drops an owner. Returns true when the caller was the last owner and
+  ## must free the node.
+  when n[].rc is Atomic:
     if n[].rc.fetchSub(1, moRelease) == 1:
       fence(moAcquire)
       true
     else:
       false
+  else:
+    # Checked arithmetic can make generated cleanup return early while an
+    # exception is pending. Match the atomic operations' wrapping arithmetic.
+    n[].rc = n[].rc -% 1
+    n[].rc == 0
 
-  proc isUnique*[N](n: ptr N): bool {.inline.} =
-    ## True when the caller holds the only reference, so the node may be
-    ## mutated in place. Acquire pairs with the release in `dropRef`.
+proc isUnique*[N](n: ptr N): bool {.inline.} =
+  ## True when the caller holds the only reference, so the node may be
+  ## mutated in place. For atomic counts, the acquire pairs with the release
+  ## in `dropRef`.
+  when n[].rc is Atomic:
     n[].rc.load(moAcquire) == 1
+  else:
+    n[].rc == 1
 
-else:
-  template plainRc(n: untyped): untyped =
-    # `Atomic[T]` has the same layout as `T`.
-    cast[ptr typeof(n[].rc.load(moRelaxed))](addr n[].rc)[]
-
-  proc retain*[N](n: ptr N) {.inline.} =
-    ## Adds an owner. The caller must already own a reference.
-    inc plainRc(n)
-
-  proc dropRef*[N](n: ptr N): bool {.inline.} =
-    ## Drops an owner. Returns true when the caller was the last owner and
-    ## must free the node.
-    dec plainRc(n)
-    plainRc(n) == 0
-
-  proc isUnique*[N](n: ptr N): bool {.inline.} =
-    ## True when the caller holds the only reference.
-    plainRc(n) == 1
+proc raiseIndex*(i, size: int) {.noinline, noreturn.} =
+  raise newException(IndexDefect, "index " & $i & " not in 0 .. " & $(size - 1))
 
 proc mixHash*(h: Hash): uint64 {.inline.} =
   ## Spreads a user hash over 64 bits (murmur3 finalizer), so weak hashes
@@ -110,3 +133,35 @@ proc mixHash*(h: Hash): uint64 {.inline.} =
 proc keyHash*[K](key: K): uint64 {.inline.} =
   mixin hash
   mixHash(hash(key))
+
+template resetOnError*(value, body: untyped) =
+  ## A raising copy can leave an owned value behind even when Nim omits
+  ## its implicit destruction. Handle cleanup before propagating the error.
+  when supportsCopyMem(typeof(value)):
+    body
+  else:
+    try:
+      body
+    except Exception:
+      reset(value)
+      raise
+
+template resetOnCopyError*(T: typedesc, value, body: untyped) =
+  ## Use when only an element copy can fail while owning allocations.
+  when supportsCopyMem(T):
+    body
+  else:
+    resetOnError(value):
+      body
+
+proc appendCopy*[V, T](v: var V, x: T) {.inline.} =
+  mixin add
+  when supportsCopyMem(T):
+    v.add(x)
+  else:
+    # An implicit `=dup` for the sink argument can strand a partial copy in
+    # its result. Copy into a local whose cleanup is under our control.
+    var value: T
+    resetOnError(value):
+      value = x
+    v.add(move(value))

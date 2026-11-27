@@ -11,7 +11,8 @@
 - Run all tests: `nim test`.
 - Run one test: `nim r tests/ttriemap.nim`.
 - Run every memory manager (arc, orc, atomicArc): `nim testAll`.
-- Run container tests with plain refcounts: `nim testSingleThread`.
+- Run container tests with `--threads:off` (plain refcounts): `nim testThreadsOff`.
+- Run container tests against `thetos/local`: `nim testLocal`.
 
 ## Coding Style & Naming
 - Indentation: 2 spaces; no tabs.

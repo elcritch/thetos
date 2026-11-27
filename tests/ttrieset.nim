@@ -1,6 +1,9 @@
 import std/[unittest, random, sequtils, algorithm]
 import std/sets
-import thetos/trieset
+when defined(thetosTestLocal):
+  import thetos/local # the same tests, against the thread-local variants
+else:
+  import thetos/trieset
 
 suite "TrieSet":
   test "basic insert and erase keep versions":
@@ -54,3 +57,37 @@ suite "TrieSet":
   test "hash and string":
     check hash(toTrieSet([1, 2, 3])) == hash(toTrieSet([3, 2, 1]))
     check $toTrieSet([7]) == "{7}"
+
+suite "TrieSet diff":
+  test "added and removed":
+    let a = toTrieSet([1, 2, 3])
+    let b = a.erase(1).insert(4).insert(2)
+    var got: seq[(DiffKind, int)]
+    for d in diff(a, b):
+      got.add (d.kind, d.item)
+    check got.sorted() == @[(dkAdded, 4), (dkRemoved, 1)]
+
+  test "random edits agree with HashSet":
+    var r = initRand(5)
+    for round in 0 ..< 40:
+      var a = initTrieSet[int]()
+      for i in 0 ..< r.rand(3000):
+        a.incl r.rand(5000)
+      var b = a
+      for i in 0 ..< r.rand(200):
+        let x = r.rand(5000)
+        if r.rand(1) == 0:
+          b.excl x
+        else:
+          b.incl x
+      var want: seq[(DiffKind, int)]
+      for x in a:
+        if x notin b:
+          want.add (dkRemoved, x)
+      for x in b:
+        if x notin a:
+          want.add (dkAdded, x)
+      var got: seq[(DiffKind, int)]
+      for d in diff(a, b):
+        got.add (d.kind, d.item)
+      check got.sorted() == want.sorted()

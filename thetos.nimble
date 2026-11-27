@@ -1,8 +1,8 @@
-version       = "0.1.0"
-author        = "Your Name"
+version       = "0.2.0"
+author        = "Jaremy Creechley"
 description   = "Persistent immutable data structures (map, set, vector, box, atom) with lock-free sharing between threads"
-license       = "MIT"
+license       = "BSD-3"
 srcDir        = "src"
 
-requires "nim >= 2.0.0"
+requires "nim >= 2.2.12"
 
