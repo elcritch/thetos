@@ -111,7 +111,7 @@ suite "FlexStr":
     check runes == toRunes("añb€😀é")
 
   test "rune traversal follows std/unicode across leaf boundaries and at EOF":
-    for offset in 27 .. 33:
+    for offset in 123 .. 129:
       for tail in ["€😀", "\x80", "\xf0\x9f", "\xe2a", "\xf8abcd", "\xfcabcde"]:
         let bytes = repeat('x', offset) & tail
         let s = toFlexStr(bytes)

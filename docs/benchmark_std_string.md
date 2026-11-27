@@ -8,10 +8,26 @@ operations, to show where each one is the right choice.
 * **`ImmStr`**: immutable string. One contiguous buffer behind a reference
   count, with a hash cached on first use. Copies are O(1). Building a new
   string (`&`, slicing) copies bytes, like `string`.
-* **`FlexStr`**: persistent string (rope). Bytes in 32-byte leaves of a
+* **`FlexStr`**: persistent string (rope). Bytes in 128-byte leaves of a
   relaxed radix-balanced tree (`FlexVec[char]`). Copies are O(1), and
   concatenation, slicing, insertion and erasing are O(log n) and share
   structure with the inputs.
+
+## FlexStr leaf size
+
+Version 0.5.0 increased the capacity of a `FlexStr` leaf from 32 to
+128 bytes. Building a 64 KiB string now needs 512 leaves instead of 2,048.
+The table shows the median of three invocations of the benchmark program
+for each capacity, using the setup below.
+
+| Operation, 64 KiB | 32-byte leaves | 128-byte leaves |
+|---|---:|---:|
+| Build from `string` | 132.5 µs | 69.8 µs |
+| Convert back to `string` | 8.08 µs | 3.49 µs |
+| Compare two equal values | 6.79 µs | 3.06 µs |
+| Random byte lookup | 6.1 ns | 4.6 ns |
+| Insert 8 bytes | 2.01 µs | 1.72 µs |
+| Replace one byte and retain each version | 277 ns | 250 ns |
 
 ## Setup
 
@@ -25,6 +41,8 @@ operations, to show where each one is the right choice.
   are particularly sensitive to timing variation.
 
 ## Summary
+
+The summary and detailed results below use the original 32-byte leaves.
 
 | Workload | Best choice | Why |
 |---|---|---|
@@ -162,7 +180,7 @@ same benchmark. The timed loop includes maintaining the version history.
 | `$FlexStr` | 8073.5 ns |
 
 `ImmStr` converts in each direction with one allocation and `copyMem`.
-`FlexStr` allocates a node per 32 bytes when built (2,048 leaves for
+`FlexStr` allocated a node per 32 bytes in this run (2,048 leaves for
 64 KiB), and flattening it gathers them back. Build a `FlexStr` once and
 edit it, rather than converting back and forth.
 
