@@ -382,8 +382,8 @@ iterator champDiff[E](a, b: ChampPtr[E]): tuple[old, new: ptr E] =
   ## Walks two tries in step and yields entries that may differ:
   ## `(old, nil)` for keys only in `a`, `(nil, new)` for keys only in `b`,
   ## and `(old, new)` for keys in both (the caller compares the rest of the
-  ## entry). Subtrees shared by both tries are skipped, so the cost grows
-  ## with the size of the difference rather than the size of the tries.
+  ## entry). Subtrees shared by both tries are skipped. Matching two
+  ## full-hash collision nodes can require comparing every pair of keys.
   ## The caller must keep both roots alive.
   mixin `==`
   if a == b:

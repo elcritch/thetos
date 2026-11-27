@@ -89,9 +89,9 @@ proc `<=`*[T](a, b: TrieSet[T]): bool =
 
 iterator diff*[T](a, b: TrieSet[T]): SetDiff[T] =
   ## Yields every item added in `b` or removed from `a`. Parts of the two
-  ## sets that are still shared are skipped without being visited, so
-  ## diffing two versions costs time proportional to how much changed. The
-  ## order is unspecified.
+  ## sets that are still shared are skipped without being visited. Matching
+  ## two full-hash collision buckets can require comparing every pair of
+  ## items across the buckets. The order is unspecified.
   runnableExamples:
     let a = toTrieSet([1, 2, 3])
     let b = a.erase(1).insert(4)

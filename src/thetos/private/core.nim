@@ -4,7 +4,7 @@
 ## The reference count helpers pick their operations from the type of a
 ## node's `rc` field: `Atomic[int]` (or `Atomic[int64]`) uses atomic
 ## operations, a plain `int` uses ordinary arithmetic. The containers in
-## `thetos` use `DefaultRc` (atomic unless `-d:thetosSingleThread`); the
+## `thetos` use `DefaultRc` (atomic unless built with `--threads:off`); the
 ## ones in `thetos/local` always use `int`.
 
 import std/[atomics, hashes, typetraits]
@@ -60,8 +60,9 @@ proc freeAlignedRaw*(p: pointer, alignment: static int) {.inline.} =
   else:
     freeRaw(cast[ptr pointer](cast[uint](p) - uint(sizeof(pointer)))[])
 
-const thetosAtomicRc* = not defined(thetosSingleThread)
-  ## False when built with `-d:thetosSingleThread`.
+const thetosAtomicRc* = compileOption("threads")
+  ## False when built with `--threads:off`. A program without threads cannot
+  ## share values between threads, so plain counts are always safe there.
 
 when thetosAtomicRc:
   type DefaultRc* = Atomic[int] ## reference count type of the `thetos` containers

@@ -6,42 +6,53 @@
 ## * thread-local thetos containers from `thetos/local`, whose node
 ##   reference counts are never atomic.
 ##
-## thetos containers keep their elements behind raw pointers, so they are
-## recognized by name and confirmed by the `rc` field of their nodes.
+## thetos containers keep their elements behind raw pointers. Recognize
+## their private node types to find those elements through type aliases.
 
 import std/macros
+import ../[box, flexvec, local, triemap, trieset, trievec]
 
-type Finding = enum
-  fRefs ## a Nim ref or closure
-  fLocal ## a container with plain (non-atomic) node reference counts
+type
+  Finding = enum
+    fRefs ## a Nim ref or closure
+    fLocal ## a container with plain (non-atomic) node reference counts
 
-const containerNames = ["TrieMap", "TrieSet", "TrieVec", "FlexVec", "Box"]
+  DefaultContainers =
+    tuple[
+      m: triemap.TrieMap[int, int],
+      s: trieset.TrieSet[int],
+      v: trievec.TrieVec[int],
+      f: flexvec.FlexVec[int],
+      b: box.Box[int],
+    ]
 
-proc nodeRc(typ: NimNode): NimNode {.compileTime.} =
-  ## For a thetos container instance, the type of its nodes' `rc` field;
-  ## nil for anything else.
-  if typ.kind != nnkBracketExpr or typ[0].kind != nnkSym or $typ[0] notin containerNames:
-    return nil
-  let impl = typ.getTypeImpl()
-  if impl.kind != nnkObjectTy:
-    return nil
-  for field in impl[2]:
-    if field.kind != nnkIdentDefs:
-      continue
-    let target = field[^2].getTypeImpl()
-    if target.kind != nnkPtrTy:
-      continue
-    let node = target[0].getTypeImpl()
-    if node.kind != nnkObjectTy:
-      continue
-    for nodeField in node[2]:
-      if nodeField.kind == nnkIdentDefs and nodeField[0].eqIdent("rc"):
-        return nodeField[^2]
-  nil
+  LocalContainers =
+    tuple[
+      m: local.TrieMap[int, int],
+      s: local.TrieSet[int],
+      v: local.TrieVec[int],
+      f: local.FlexVec[int],
+      b: local.Box[int],
+    ]
 
-proc scan(typ: NimNode, visited: var seq[NimNode]): set[Finding] {.compileTime.} =
+proc nodeTypes(containers: NimNode): seq[NimNode] {.compileTime.} =
+  for entry in containers.getTypeImpl():
+    for field in entry[^2].getTypeImpl()[2]:
+      let fieldType = field[^2].getTypeImpl()
+      if fieldType.kind == nnkPtrTy:
+        result.add fieldType[0][0]
+        break
+
+proc scan(
+    typ: NimNode, defaultNodes, localNodes: seq[NimNode], visited: var seq[NimNode]
+): set[Finding] {.compileTime.} =
+  template visit(child: NimNode): set[Finding] =
+    scan(child, defaultNodes, localNodes, visited)
+
   case typ.kind
-  of nnkRefTy, nnkIteratorTy:
+  of nnkRefTy:
+    return {fRefs} + visit(typ[0])
+  of nnkIteratorTy:
     return {fRefs}
   of nnkProcTy:
     # Proc types are closures unless they name another calling convention.
@@ -52,38 +63,49 @@ proc scan(typ: NimNode, visited: var seq[NimNode]): set[Finding] {.compileTime.}
     return {fRefs}
   of nnkObjectTy:
     if typ[1].kind == nnkOfInherit:
-      result = scan(typ[1][0], visited)
-    result = result + scan(typ[2], visited)
+      result = visit(typ[1][0])
+    result = result + visit(typ[2])
   of nnkTupleTy, nnkRecList, nnkRecCase, nnkOfBranch, nnkElse, nnkTupleConstr:
     for child in typ:
       if child.kind notin {nnkEmpty, nnkIdent}:
-        result = result + scan(child, visited)
+        result = result + visit(child)
   of nnkIdentDefs:
-    return scan(typ[^2], visited)
+    return visit(typ[^2])
   of nnkDistinctTy:
-    return scan(typ[0], visited)
+    return visit(typ[0])
+  of nnkPtrTy:
+    let node = typ[0]
+    if node.kind == nnkBracketExpr:
+      if node[0] in localNodes:
+        result.incl fLocal
+      elif node[0] notin defaultNodes:
+        return
+      when not compileOption("threads"):
+        result.incl fLocal # without threads, the default containers use plain counts
+      for i in 1 ..< node.len:
+        result = result + visit(node[i])
   of nnkBracketExpr, nnkSym:
+    if typ.kind == nnkBracketExpr and typ[0].kind == nnkSym and
+        typ[0].typeKind in {ntySequence, ntyArray}:
+      return visit(typ[^1])
     for previous in visited:
       if sameType(typ, previous):
         return {}
     visited.add typ
-    if typ.kind == nnkBracketExpr:
-      let rc = nodeRc(typ)
-      if rc != nil and rc.getTypeImpl().kind != nnkObjectTy:
-        result.incl fLocal # plain `int` count rather than `Atomic[int]`
-      if rc != nil or typ[0].eqIdent("seq") or typ[0].eqIdent("array"):
-        for i in 1 ..< typ.len:
-          result = result + scan(typ[i], visited)
-        return
     let impl = typ.getTypeImpl()
     if impl.kind != nnkSym or impl != typ:
-      return scan(impl, visited)
+      return visit(impl)
   else:
     discard
 
 proc findings(T: NimNode): set[Finding] {.compileTime.} =
   var visited: seq[NimNode]
-  scan(T.getTypeInst()[1], visited)
+  scan(
+    T.getTypeInst()[1],
+    nodeTypes(bindSym"DefaultContainers"),
+    nodeTypes(bindSym"LocalContainers"),
+    visited,
+  )
 
 macro holdsNimRefs*(T: typedesc): bool =
   ## True when copying a `T` changes a Nim `ref` or closure reference count.
@@ -91,6 +113,6 @@ macro holdsNimRefs*(T: typedesc): bool =
 
 macro holdsLocalContainers*(T: typedesc): bool =
   ## True when `T` holds a thetos container with plain (non-atomic) node
-  ## reference counts: one from `thetos/local`, or any container under
-  ## `-d:thetosSingleThread`.
+  ## reference counts: one from `thetos/local`, or any container in a
+  ## build with `--threads:off`.
   newLit(fLocal in findings(T))

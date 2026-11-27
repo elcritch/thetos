@@ -132,13 +132,24 @@ iterator values*[K, V](m: TrieMap[K, V]): lent V =
   for e in champEntries(keep.root):
     yield e.value
 
+proc mapChange[K, V](
+    kind: DiffKind, key: K, old, new: ptr MapEntry[K, V]
+): MapDiff[K, V] =
+  resetOnError(result):
+    result.kind = kind
+    result.key = key
+    if old != nil:
+      result.oldValue = old.value
+    if new != nil:
+      result.newValue = new.value
+
 iterator diff*[K, V](a, b: TrieMap[K, V]): MapDiff[K, V] =
   ## Yields every key that differs between `a` and `b`: added in `b`,
   ## removed from `a`, or present in both with values that are not `==`.
   ## Parts of the two maps that are still shared (for example when `b` was
-  ## derived from `a`) are skipped without being visited, so diffing two
-  ## versions costs time proportional to how much changed. The order is
-  ## unspecified.
+  ## derived from `a`) are skipped without being visited. Matching two
+  ## full-hash collision buckets can require comparing every pair of keys
+  ## across the buckets. The order is unspecified.
   runnableExamples:
     let a = toTrieMap({1: "one", 2: "two"})
     let b = a.put(2, "deux").put(3, "trois")
@@ -153,13 +164,11 @@ iterator diff*[K, V](a, b: TrieMap[K, V]): MapDiff[K, V] =
   let kb = `=dup`(b)
   for (old, new) in champDiff(ka.root, kb.root):
     if old == nil:
-      yield MapDiff[K, V](kind: dkAdded, key: new.key, newValue: new.value)
+      yield mapChange(dkAdded, new.key, old, new)
     elif new == nil:
-      yield MapDiff[K, V](kind: dkRemoved, key: old.key, oldValue: old.value)
+      yield mapChange(dkRemoved, old.key, old, new)
     elif not (old.value == new.value):
-      yield MapDiff[K, V](
-        kind: dkChanged, key: old.key, oldValue: old.value, newValue: new.value
-      )
+      yield mapChange(dkChanged, old.key, old, new)
 
 proc `==`*[K, V](a, b: TrieMap[K, V]): bool =
   if a.root == b.root:

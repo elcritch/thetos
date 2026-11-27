@@ -119,6 +119,26 @@ suite "FlexVec":
         discard v.checkInvariants()
     check v.len == 0
 
+  test "appending past high(int) preserves shared vectors":
+    checkNoLeaks:
+      var v = toFlexVec([1])
+      for i in 0 ..< sizeof(int) * 8 - 2:
+        v.add(v)
+      let size = v.len
+      expect OverflowDefect:
+        v.add(v)
+      check v.len == size
+      check v.last == 1
+
+      var full = v & v.take(size - 1)
+      check full.len == high(int)
+      expect OverflowDefect:
+        full.add(2)
+      expect OverflowDefect:
+        discard full.pushBack(2)
+      check full.len == high(int)
+      check full.last == 1
+
   test "deep trees from repeated concatenation":
     var v = rangeVec(0, 37)
     var model = toSeq(v)

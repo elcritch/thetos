@@ -47,10 +47,21 @@ suite "thetos/local":
     check local.box("x")[] == box.box("x")[]
 
   test "thread-local containers are detected at any depth":
+    type
+      LocalValue = local.TrieVec[int]
+      SharedMap = thetos.TrieMap[int, LocalValue]
+      LocalSeq = seq[LocalValue]
+      Sequence[T] = seq[T]
+
     check holdsLocalContainers(local.TrieMap[int, int])
     check holdsLocalContainers(local.Box[string])
     check holdsLocalContainers(thetos.TrieMap[int, local.TrieVec[int]])
     check holdsLocalContainers(seq[local.FlexVec[int]])
+    check holdsLocalContainers(LocalValue)
+    check holdsLocalContainers(SharedMap)
+    check holdsLocalContainers(LocalSeq)
+    check holdsLocalContainers(Sequence[LocalValue])
+    check holdsLocalContainers(array[2, LocalValue])
     check not holdsLocalContainers(thetos.TrieMap[int, thetos.TrieVec[int]])
     check not holdsLocalContainers(seq[int])
 
@@ -64,3 +75,24 @@ suite "thetos/local":
     const nested = compileFixture("--threads:on --mm:atomicArc -d:nested")
     check nested.exitCode != 0
     check message in nested.output
+    const aliased = compileFixture("--threads:on --mm:atomicArc -d:localAlias")
+    check aliased.exitCode != 0
+    check message in aliased.output
+    const throughRef = compileFixture("--threads:on --mm:atomicArc -d:localRef")
+    check throughRef.exitCode != 0
+    check message in throughRef.output
+    const throughObject = compileFixture("--threads:on --mm:atomicArc -d:shadowedSeq")
+    check throughObject.exitCode != 0
+    check message in throughObject.output
+
+  test "Atom accepts an unrelated type named Box":
+    type
+      Status = object
+        rc: int
+
+      Box[T] = object
+        status: ptr Status
+        value: T
+
+    var a = initAtom(Box[int](value: 42))
+    check a.load().value == 42

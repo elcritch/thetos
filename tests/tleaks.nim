@@ -123,6 +123,19 @@ suite "leaks":
       m[1] = fallibleValue(3)
       check snapshot[1].value[] == 1
 
+  test "throwing copies release partial map diff records":
+    for budget in 0 .. 1:
+      checkNoLeaks:
+        let a = toTrieMap({1: fallibleValue(1)})
+        let b = toTrieMap({1: fallibleValue(2)})
+        copiesBeforeFailure = budget
+        expect ValueError:
+          for change in diff(a, b):
+            discard change.kind
+        copiesBeforeFailure = -1
+        check a[1].value[] == 1
+        check b[1].value[] == 2
+
   test "throwing copies release partial vector clones":
     checkNoLeaks:
       var v = toTrieVec([fallibleValue(1), fallibleValue(2)])

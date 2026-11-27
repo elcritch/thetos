@@ -308,12 +308,17 @@ proc normalize[T](root: var FlexPtr[T], shift: var int) =
     root = child
     shift -= flexBits
 
+proc raiseFlexOverflow() {.noinline, noreturn.} =
+  raise newException(OverflowDefect, "FlexVec length exceeds high(int)")
+
 proc add*[T](v: var FlexVec[T], x: sink T) =
   ## Appends `x` to this vector value only; other copies are not affected.
   # Keep the incoming value owned locally while a shared leaf is copied.
   var value = x
   defer:
     reset(value)
+  if v.size == high(int):
+    raiseFlexOverflow()
   if v.tail == nil:
     v.tail = allocFlexLeaf[T]()
   elif v.tail.count < flexWidth:
@@ -609,6 +614,8 @@ proc concatTrees[T](
 
 proc add*[T](v: var FlexVec[T], w: FlexVec[T]) =
   ## Appends every element of `w` to this vector value only, in O(log n).
+  if w.size > high(int) - v.size:
+    raiseFlexOverflow()
   if w.size == 0:
     return
   if v.size == 0:
@@ -661,7 +668,7 @@ proc pop*[T](v: var FlexVec[T]): T =
 proc pushBack*[T](v: sink FlexVec[T], x: sink T): FlexVec[T] =
   ## Returns a vector with `x` appended.
   result = v
-  resetOnCopyError(T, result):
+  resetOnError(result):
     result.add(x)
 
 proc pushFront*[T](v: sink FlexVec[T], x: sink T): FlexVec[T] =

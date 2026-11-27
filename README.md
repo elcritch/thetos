@@ -93,9 +93,9 @@ assert total == 12
 ```
 
 `diff(a, b)` lists what changed between two versions, after `immer::diff`.
-It skips every subtree the versions still share, so comparing a map with
-one derived from it costs time proportional to the number of changes, not
-the size of the map. The order is unspecified.
+It skips every subtree the versions still share. Matching two buckets of
+keys with the same full hash can require comparing every pair of keys across
+the buckets. The order is unspecified.
 
 ```nim
 import thetos
@@ -351,30 +351,26 @@ resolve by argument type. `thetos.box` names the re-exported `box` module,
 so the shared constructor is written `box.box(x)` and the local one
 `local.box(x)`.
 
-`Atom` rejects thread-local containers at compile time, at any depth, under
-every memory manager. Nothing stops other ways of passing them to another
-thread, such as `createThread` arguments or channels, so keep them on the
-thread that made them.
+With threads enabled, `Atom` rejects thread-local containers in its payload
+type, including through aliases and nested fields. Keep these values on the
+thread that made them, including when using `createThread` or channels.
 
 On an Apple M3 Pro, plain counts made persistent updates of shared maps and
 sets about 20% faster and in-place vector `[]=` about 2 ns faster. Lookups,
 iteration and building a container you own alone barely changed.
 
-### Single-threaded builds
+### Builds without threads
 
-A program that never shares thetos values between threads at all can
-build with `-d:thetosSingleThread` instead of changing its imports. The
-containers in `thetos` then use plain counts too. This removes nothing from
-the API except `Atom`, which fails to compile in this mode. With the flag
-set, sharing any thetos value between threads is a data race, and the
-compiler cannot detect it.
+A program built with `--threads:off` cannot share values between threads
+at all, so the containers in `thetos` use plain counts there too,
+automatically. Nothing in the API changes, and `Atom` still works.
 
 ## Known limitations
 
 * If an element's `=copy` hook raises during `add(openArray)`, elements
   already appended remain in the vector. Both `TrieVec` and `FlexVec`
   release partially copied elements and temporary nodes when a copy raises,
-  including with `-d:thetosSingleThread`.
+  including with plain reference counts.
 * thetos requires Nim 2.2.12 or later. Nim 2.2.10 can leak allocations when
   a copy raises during a vector update or `Atom.update`.
 
@@ -384,7 +380,7 @@ compiler cannot detect it.
 atlas install               # dependencies (none at the moment)
 nim test                    # all tests with the default config (atomicArc)
 nim testAll                 # arc, orc and atomicArc in debug and release
-nim testSingleThread        # container tests with -d:thetosSingleThread
+nim testThreadsOff          # container tests with --threads:off
 nim testLocal               # container tests against thetos/local
 nim r tests/ttriemap.nim    # one test file
 atlas-run tests -- --skipParentCfg --threads:on --mm:arc   # what CI runs, in parallel

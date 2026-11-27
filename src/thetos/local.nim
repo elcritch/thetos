@@ -15,9 +15,8 @@
 ## other procs resolve by argument type. `Atom` rejects these types at
 ## compile time.
 ##
-## For a program that never shares thetos values between threads at all,
-## `-d:thetosSingleThread` switches the `thetos` containers themselves to
-## plain counts instead.
+## A program built with `--threads:off` cannot share values between threads
+## at all, so there the `thetos` containers use plain counts too.
 
 runnableExamples:
   import thetos

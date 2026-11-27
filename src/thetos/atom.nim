@@ -35,13 +35,6 @@ runnableExamples:
   )
   assert counts.load()["hits"] == 1
 
-when defined(thetosSingleThread):
-  {.
-    error:
-      "thetos/atom shares values between threads and cannot be used " &
-      "with -d:thetosSingleThread"
-  .}
-
 import std/[atomics, typetraits]
 import ./private/[core, reftraits]
 
