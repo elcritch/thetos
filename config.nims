@@ -9,7 +9,8 @@ proc testFiles(): seq[string] =
     if testFile.endsWith(".nim") and testFile.splitFile().name.startsWith("t"):
       result.add testFile
 
-# Suites that do not need threads or Atom, rerun with -d:thetosSingleThread.
+# Container suites that do not need threads or Atom. They are rerun with
+# -d:thetosSingleThread and, with -d:thetosTestLocal, against thetos/local.
 const singleThreadTests = ["tests/ttriemap.nim", "tests/ttrieset.nim", "tests/ttrievec.nim",
   "tests/tflexvec.nim", "tests/tbox.nim"]
 
@@ -27,7 +28,13 @@ task testAll, "run unit tests under arc, orc and atomicArc, debug and release":
       for testFile in singleThreadTests:
         exec("nim c -r --hints:off --skipParentCfg --threads:on --mm:" & mm & " " &
           mode & " -d:thetosSingleThread " & quoteShell(testFile))
+        exec("nim c -r --hints:off --skipParentCfg --threads:on --mm:" & mm & " " &
+          mode & " -d:thetosTestLocal " & quoteShell(testFile))
 
 task testSingleThread, "run container tests with -d:thetosSingleThread":
   for testFile in singleThreadTests:
     exec("nim c -r -d:thetosSingleThread " & quoteShell(testFile))
+
+task testLocal, "run container tests against thetos/local":
+  for testFile in singleThreadTests:
+    exec("nim c -r -d:thetosTestLocal " & quoteShell(testFile))

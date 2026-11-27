@@ -1,6 +1,9 @@
 import std/[unittest, random, sequtils, algorithm]
 import std/sets
-import thetos/trieset
+when defined(thetosTestLocal):
+  import thetos/local # the same tests, against the thread-local variants
+else:
+  import thetos/trieset
 
 suite "TrieSet":
   test "basic insert and erase keep versions":

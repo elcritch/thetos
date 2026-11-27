@@ -1,5 +1,5 @@
-## CHAMP (Compressed Hash-Array Mapped Prefix-tree) core shared by `TrieMap`
-## and `TrieSet`.
+## CHAMP (Compressed Hash-Array Mapped Prefix-tree) core shared by `TrieMap` and
+## `TrieSet`. Included, not imported: see the note below.
 ##
 ## Each node is one shared-heap block laid out as:
 ##
@@ -17,24 +17,25 @@
 ## immutable, and is safe across threads because a refcount of 1 proves no
 ## other owner exists.
 
-import std/[atomics, bitops]
-import ./core
+# Included by the container modules and by `thetos/local`; not a module.
+# The including module imports `std/[bitops, hashes, options]` and
+# `private/core`, and declares `RcCount`, the type of each node's `rc`.
 
 const
   champBits = 5
   champMask = 31'u64
   hashBits = 64
-  maxChampDepth* = hashBits div champBits + 2
+  maxChampDepth = hashBits div champBits + 2
 
 type
-  ChampNode*[E] = object
-    rc*: Atomic[int] # exported for the generic refcount helpers in core
+  ChampNode[E] = object
+    rc*: RcCount # exported for the generic refcount helpers in core
     datamap: uint32
     nodemap: uint32
     nentries: uint32
     nchildren: uint32
 
-  ChampPtr*[E] = ptr ChampNode[E]
+  ChampPtr[E] = ptr ChampNode[E]
 
 template entryOffset(E: typedesc, nchildren: int): int =
   alignUp(sizeof(ChampNode[E]) + nchildren * sizeof(pointer), alignof(E))
@@ -59,7 +60,7 @@ proc allocChamp[E](nentries, nchildren: int): ChampPtr[E] =
     doAssert alignof(E) <= 16, "entry alignment above 16 is unsupported"
   let size = entryOffset(E, nchildren) + nentries * sizeof(E)
   result = cast[ChampPtr[E]](allocRaw(size))
-  result.rc.store(1, moRelaxed)
+  initRc(result)
   result.nentries = uint32(nentries)
   result.nchildren = uint32(nchildren)
 
@@ -69,7 +70,7 @@ template destroyEntry(e: untyped) =
   {.cast(raises: []), cast(gcsafe).}:
     `=destroy`(e)
 
-proc release*[E](n: ChampPtr[E]) {.raises: [], gcsafe.} =
+proc release[E](n: ChampPtr[E]) {.raises: [], gcsafe.} =
   ## Drops one reference, freeing the node and its subtree when it was the
   ## last one.
   if n != nil and dropRef(n):
@@ -127,7 +128,7 @@ proc replaceSlot[E](slot: var ChampPtr[E], fresh: ChampPtr[E], stolen: bool) =
     release(slot)
   slot = fresh
 
-proc champFind*[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E =
+proc champFind[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E =
   mixin `==`
   var n = root
   var shift = 0
@@ -173,7 +174,7 @@ proc mergeTwo[E](
     result.nodemap = 1'u32 shl fa
     result.childArr[0] = mergeTwo(a, ha, b, hb, shift + champBits)
 
-proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): bool =
+proc champInsert[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): bool =
   ## Inserts `e`, replacing an entry with an equal key. Returns true when
   ## the key was not present before.
   mixin `==`
@@ -264,7 +265,7 @@ proc champInsert*[E](slot: var ChampPtr[E], shift: int, h: uint64, e: sink E): b
     replaceSlot(slot, move(fresh), steal)
     return true
 
-proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
+proc champErase[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
   ## Removes `key`. Precondition: `key` is present.
   mixin `==`
   let n = slot
@@ -351,7 +352,7 @@ proc champErase*[E, K](slot: var ChampPtr[E], shift: int, h: uint64, key: K) =
   freeRaw(owned)
   slot = fresh
 
-iterator champEntries*[E](root: ChampPtr[E]): ptr E =
+iterator champEntries[E](root: ChampPtr[E]): ptr E =
   ## Pre-order walk over every entry. The caller must keep `root` alive.
   if root != nil:
     var stack: array[maxChampDepth + 1, tuple[node: ChampPtr[E], next: int]]
@@ -372,18 +373,12 @@ iterator champEntries*[E](root: ChampPtr[E]): ptr E =
       else:
         dec sp
 
-type
-  DiffKind* = enum ## What happened to a key between two versions.
-    dkAdded ## only in the second version
-    dkRemoved ## only in the first version
-    dkChanged ## in both, with different values (maps only)
+type DiffFrame[E] = object
+  a, b: ChampPtr[E]
+  shift: int
+  pos: int ## next hash fragment to compare
 
-  DiffFrame[E] = object
-    a, b: ChampPtr[E]
-    shift: int
-    pos: int ## next hash fragment to compare
-
-iterator champDiff*[E](a, b: ChampPtr[E]): tuple[old, new: ptr E] =
+iterator champDiff[E](a, b: ChampPtr[E]): tuple[old, new: ptr E] =
   ## Walks two tries in step and yields entries that may differ:
   ## `(old, nil)` for keys only in `a`, `(nil, new)` for keys only in `b`,
   ## and `(old, new)` for keys in both (the caller compares the rest of the
@@ -492,7 +487,7 @@ iterator champDiff*[E](a, b: ChampPtr[E]): tuple[old, new: ptr E] =
         for e in champEntries(y.childArr[index(y.nodemap, bit)]):
           yield (nil, e)
 
-proc champDepth*[E](root: ChampPtr[E]): int =
+proc champDepth[E](root: ChampPtr[E]): int =
   ## Maximum node depth; for tests and diagnostics.
   if root == nil:
     return 0

@@ -15,9 +15,12 @@
 ## so values can be passed between threads under `--mm:arc`, `orc` or
 ## `atomicArc` without locks.
 ##
-## Programs that never share thetos values between threads can build with
-## `-d:thetosSingleThread` to use plain, non-atomic reference counts. `Atom`
-## is not available in that mode.
+## `thetos/local <thetos/local.html>`_ has thread-local variants of the
+## containers (`local.TrieMap` and so on) with plain, non-atomic reference
+## counts, for values that never leave one thread. It is not exported from
+## this module. Programs that never share thetos values between threads at
+## all can instead build with `-d:thetosSingleThread` to make every
+## container use plain counts. `Atom` is not available in that mode.
 
 import thetos/[triemap, trieset, trievec, flexvec, box]
 export triemap, trieset, trievec, flexvec, box

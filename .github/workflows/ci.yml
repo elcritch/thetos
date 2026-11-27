@@ -53,3 +53,6 @@ jobs:
 
       - name: Run container tests with -d:thetosSingleThread
         run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tflexvec tbox -- $NIM_ARGS -d:thetosSingleThread
+
+      - name: Run container tests against thetos/local
+        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tflexvec tbox -- $NIM_ARGS -d:thetosTestLocal

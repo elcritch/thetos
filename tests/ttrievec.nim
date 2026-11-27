@@ -1,5 +1,8 @@
 import std/[unittest, random]
-import thetos/trievec
+when defined(thetosTestLocal):
+  import thetos/local # the same tests, against the thread-local variants
+else:
+  import thetos/trievec
 import ./fixtures/falliblecopy
 
 type Counted = object ## Element that counts how often it is copied.

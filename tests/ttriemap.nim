@@ -1,5 +1,8 @@
 import std/[unittest, tables, random, hashes, options, sequtils, algorithm]
-import thetos/triemap
+when defined(thetosTestLocal):
+  import thetos/local # the same tests, against the thread-local variants
+else:
+  import thetos/triemap
 
 type BadKey = object ## Key whose hash collides heavily, to exercise collision nodes.
   id: int

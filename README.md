@@ -39,7 +39,9 @@ assert w[0] == 1              # `w` still sees the old element
 
 `import thetos` brings in every container. Each one also has its own
 module (`thetos/triemap`, `thetos/trieset`, `thetos/trievec`,
-`thetos/flexvec`, `thetos/box`, `thetos/atom`).
+`thetos/flexvec`, `thetos/box`, `thetos/atom`). Thread-local variants with
+non-atomic reference counts live in `thetos/local`; see
+[Thread-local containers](#thread-local-containers).
 
 ## How updates work
 
@@ -317,20 +319,55 @@ API: `initAtom`, `load`, `store`, `exchange`, `update`.
 * Under ORC, reference cycles that pass through an thetos container are
   not collected. Persistent values cannot form cycles on their own.
 
-## Single-threaded builds
+## Thread-local containers
 
-Programs that never share thetos values between threads can build with
-`-d:thetosSingleThread`. Node reference counts then use plain integer
-operations instead of atomic ones. This removes nothing from the API
-except `Atom`, which fails to compile in this mode.
+Atomic reference counts cost a little on every copy and update. For values
+that never leave one thread, `thetos/local` has the same containers with
+plain counts: `local.TrieMap`, `local.TrieSet`, `local.TrieVec`,
+`local.FlexVec` and `local.Box`. They are built from the same source and
+have the same API, but they are distinct types, so a program can use both
+kinds side by side.
 
-On an Apple M3 Pro this made persistent updates of shared maps and sets
-about 20% faster and in-place vector `[]=` about 2 ns faster. Lookups,
+```nim
+import thetos
+import thetos/local
+
+# Thread-local scratch state: plain reference counts.
+var seen = local.initTrieSet[string]()
+for word in ["a", "b", "a"]:
+  seen.incl word
+assert seen.len == 2
+
+# State shared between threads: atomic reference counts, published through
+# an Atom.
+var shared: Atom[thetos.TrieMap[string, int]]
+shared.store(thetos.toTrieMap({"words": seen.len}))
+assert shared.load()["words"] == 2
+```
+
+When both modules are imported, qualify types and constructors with the
+module name (`local.toTrieVec(...)`, `thetos.TrieMap[K, V]`); other procs
+resolve by argument type. `thetos.box` names the re-exported `box` module,
+so the shared constructor is written `box.box(x)` and the local one
+`local.box(x)`.
+
+`Atom` rejects thread-local containers at compile time, at any depth, under
+every memory manager. Nothing stops other ways of passing them to another
+thread, such as `createThread` arguments or channels, so keep them on the
+thread that made them.
+
+On an Apple M3 Pro, plain counts made persistent updates of shared maps and
+sets about 20% faster and in-place vector `[]=` about 2 ns faster. Lookups,
 iteration and building a container you own alone barely changed.
 
-With the flag set, sharing any thetos value between threads is a data race.
-The compiler cannot detect it, so only use the flag when the whole program
-keeps thetos values on one thread.
+### Single-threaded builds
+
+A program that never shares thetos values between threads at all can
+build with `-d:thetosSingleThread` instead of changing its imports. The
+containers in `thetos` then use plain counts too. This removes nothing from
+the API except `Atom`, which fails to compile in this mode. With the flag
+set, sharing any thetos value between threads is a data race, and the
+compiler cannot detect it.
 
 ## Known limitations
 
@@ -348,6 +385,7 @@ atlas install               # dependencies (none at the moment)
 nim test                    # all tests with the default config (atomicArc)
 nim testAll                 # arc, orc and atomicArc in debug and release
 nim testSingleThread        # container tests with -d:thetosSingleThread
+nim testLocal               # container tests against thetos/local
 nim r tests/ttriemap.nim    # one test file
 atlas-run tests -- --skipParentCfg --threads:on --mm:arc   # what CI runs, in parallel
 ```

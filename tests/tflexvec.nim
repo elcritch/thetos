@@ -2,7 +2,10 @@
 ## `-d:thetosTrackAllocs` (for leak checks); see tflexvec.nims.
 
 import std/[unittest, random, hashes]
-import thetos/[flexvec, trievec]
+when defined(thetosTestLocal):
+  import thetos/local # the same tests, against the thread-local variants
+else:
+  import thetos/[flexvec, trievec]
 import ./fixtures/falliblecopy
 
 proc toSeq[T](v: FlexVec[T]): seq[T] =
