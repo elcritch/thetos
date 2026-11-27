@@ -338,6 +338,8 @@ thread-local container types.
 | `TrieMap` with other key types | Array of `[key, value]` pairs |
 | `Box` | `[]` when empty, `[value]` when populated |
 
+[JSON benchmarks](docs/benchmark_jsonutils.md) cover text I/O and typed conversions.
+
 ## Box
 
 `Box[T]` holds one immutable value behind a reference count. Copying a box

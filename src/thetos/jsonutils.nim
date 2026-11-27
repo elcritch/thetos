@@ -14,10 +14,11 @@ runnableExamples:
   assert before["items"].jsonTo(seq[int]) == @[1, 2]
   assert after["items"].jsonTo(seq[int]) == @[1, 2, 3]
 
-import std/[hashes, json, options]
+import std/[formatfloat, hashes, json, options, parsejson, strbasics, streams, strutils]
 import std/jsonutils as stdJsonUtils
 import ./[box, flexstr, flexvec, immstr, triemap, trieset, trievec]
 from ./local import `[]`, `[]=`, `$`, add, incl, isEmpty, items, pairs
+from ./private/core import resetOnError
 
 export
   JsonNodeKind, JsonParsingError, Joptions, ToJsonOptions, EnumMode, JsonNodeMode,
@@ -40,6 +41,8 @@ type JsonValue* = object ## Persistent JSON tree. The default value is JSON null
     elements: FlexVec[JsonValue]
   of JObject:
     members: TrieMap[ImmStr, JsonValue]
+
+const MaxJsonDepth = 1000
 
 proc kind*(value: JsonValue): JsonNodeKind {.inline.} =
   ## The JSON kind. The stdlib represents raw number literals as `JString`.
@@ -220,33 +223,34 @@ proc hash*(value: JsonValue): Hash =
   !$(hash(value.tag) !& payload)
 
 proc fromNode(node: JsonNode, depth: int): JsonValue =
-  if node == nil:
-    return default(JsonValue)
-  if depth > 1000 and node.kind in {JArray, JObject}:
-    raise newException(ValueError, "JSON nesting depth exceeds 1000")
-  case node.kind
-  of JNull:
-    result = default(JsonValue)
-  of JBool:
-    result = JsonValue(tag: JBool, boolean: node.bval)
-  of JInt:
-    result = JsonValue(tag: JInt, integer: node.num)
-  of JFloat:
-    result = JsonValue(tag: JFloat, real: node.fnum)
-  of JString:
-    # std/json stores an unquoted number as JString with a private flag.
-    # Only strings that begin like a number can have that flag set.
-    let raw =
-      node.str.len > 0 and node.str[0] in {'-', '.', '0' .. '9'} and ($node)[0] != '"'
-    result = JsonValue(tag: JString, text: toImmStr(node.str), rawNumber: raw)
-  of JArray:
-    result = JsonValue(tag: JArray)
-    for item in node:
-      result.elements.add(fromNode(item, depth + 1))
-  of JObject:
-    result = JsonValue(tag: JObject)
-    for key, item in node:
-      result.members[toImmStr(key)] = fromNode(item, depth + 1)
+  resetOnError(result):
+    if node == nil:
+      return default(JsonValue)
+    if depth > MaxJsonDepth and node.kind in {JArray, JObject}:
+      raise newException(ValueError, "JSON nesting depth exceeds " & $MaxJsonDepth)
+    case node.kind
+    of JNull:
+      result = default(JsonValue)
+    of JBool:
+      result = JsonValue(tag: JBool, boolean: node.bval)
+    of JInt:
+      result = JsonValue(tag: JInt, integer: node.num)
+    of JFloat:
+      result = JsonValue(tag: JFloat, real: node.fnum)
+    of JString:
+      # std/json stores an unquoted number as JString with a private flag.
+      # Only strings that begin like a number can have that flag set.
+      let raw =
+        node.str.len > 0 and node.str[0] in {'-', '.', '0' .. '9'} and ($node)[0] != '"'
+      result = JsonValue(tag: JString, text: toImmStr(node.str), rawNumber: raw)
+    of JArray:
+      result = JsonValue(tag: JArray)
+      for item in node:
+        result.elements.add(fromNode(item, depth + 1))
+    of JObject:
+      result = JsonValue(tag: JObject)
+      for key, item in node:
+        result.members[toImmStr(key)] = fromNode(item, depth + 1)
 
 proc toJsonValue*(node: JsonNode): JsonValue =
   ## Copies a stdlib JSON tree into a persistent value. Nil becomes JSON null.
@@ -278,13 +282,122 @@ proc toJsonNode*(value: JsonValue): JsonNode =
     for key, item in value.members:
       result[$key] = toJsonNode(item)
 
+proc readValue(parser: var JsonParser, depth: int): JsonValue =
+  resetOnError(result):
+    case parser.tok
+    of tkNull:
+      result = default(JsonValue)
+    of tkTrue, tkFalse:
+      result = JsonValue(tag: JBool, boolean: parser.tok == tkTrue)
+    of tkString:
+      result = JsonValue(tag: JString, text: toImmStr(parser.a))
+    of tkInt:
+      try:
+        result = JsonValue(tag: JInt, integer: parseBiggestInt(parser.a))
+      except ValueError:
+        result = JsonValue(tag: JString, text: toImmStr(parser.a), rawNumber: true)
+    of tkFloat:
+      try:
+        result = JsonValue(tag: JFloat, real: parseFloat(parser.a))
+      except ValueError:
+        result = JsonValue(tag: JString, text: toImmStr(parser.a), rawNumber: true)
+    of tkBracketLe:
+      if depth > MaxJsonDepth:
+        parser.raiseParseErr("]")
+      result = JsonValue(tag: JArray)
+      discard parser.getTok()
+      while parser.tok != tkBracketRi:
+        result.elements.add(parser.readValue(depth + 1))
+        if parser.tok != tkComma:
+          break
+        discard parser.getTok()
+      parser.eat(tkBracketRi)
+      return
+    of tkCurlyLe:
+      if depth > MaxJsonDepth:
+        parser.raiseParseErr("}")
+      result = JsonValue(tag: JObject)
+      discard parser.getTok()
+      while parser.tok != tkCurlyRi:
+        if parser.tok != tkString:
+          parser.raiseParseErr("string literal as key")
+        let key = toImmStr(parser.a)
+        discard parser.getTok()
+        parser.eat(tkColon)
+        result.members[key] = parser.readValue(depth + 1)
+        if parser.tok != tkComma:
+          break
+        discard parser.getTok()
+      parser.eat(tkCurlyRi)
+      return
+    else:
+      parser.raiseParseErr("JSON value")
+    discard parser.getTok()
+
 proc parseJsonValue*(text: string): JsonValue =
-  ## Parses JSON text using the stdlib parser and returns a persistent value.
-  toJsonValue(json.parseJson(text))
+  ## Parses JSON text with the stdlib tokenizer. Raises `JsonParsingError`
+  ## for malformed input or if nesting exceeds 1000 levels.
+  var parser: JsonParser
+  parser.open(newStringStream(text), "input")
+  defer:
+    parser.close()
+  discard parser.getTok()
+  let value = parser.readValue(0)
+  parser.eat(tkEof)
+  result = value
+
+proc appendQuoted(output: var string, text: openArray[char]) =
+  output.add('"')
+  var start = 0
+  for i, c in text:
+    if c < ' ' or c in {'"', '\\'}:
+      if i > start:
+        output.add(text.toOpenArray(start, i - 1))
+      json.escapeJsonUnquoted($c, output)
+      start = i + 1
+  if start < text.len:
+    output.add(text.toOpenArray(start, text.high))
+  output.add('"')
+
+proc appendJson(output: var string, value: JsonValue) =
+  case value.tag
+  of JNull:
+    output.add("null")
+  of JBool:
+    output.add(if value.boolean: "true" else: "false")
+  of JInt:
+    output.add($value.integer)
+  of JFloat:
+    output.addFloat(value.real)
+  of JString:
+    if value.rawNumber:
+      output.add(value.text.toOpenArray())
+    else:
+      output.appendQuoted(value.text.toOpenArray())
+  of JArray:
+    output.add('[')
+    var first = true
+    for item in value.elements:
+      if not first:
+        output.add(',')
+      first = false
+      output.appendJson(item)
+    output.add(']')
+  of JObject:
+    output.add('{')
+    var first = true
+    for key, item in value.members:
+      if not first:
+        output.add(',')
+      first = false
+      output.appendQuoted(key.toOpenArray())
+      output.add(':')
+      output.appendJson(item)
+    output.add('}')
 
 proc `$`*(value: JsonValue): string =
   ## Renders compact JSON. Object member order is unspecified.
-  $toJsonNode(value)
+  result.appendJson(value)
 
 proc toJsonHook*(value: JsonValue): JsonNode =
   ## Encodes a persistent value for use with `std/jsonutils`.
