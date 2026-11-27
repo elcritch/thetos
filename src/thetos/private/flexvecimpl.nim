@@ -670,21 +670,32 @@ proc add*[T](v: var FlexVec[T], w: FlexVec[T]) =
     return
   let keep = `=dup`(w) # `w` may alias `v`
   if keep.root == nil:
-    # Few elements: append them through a copy so a failing element copy
-    # leaves `v` unchanged.
-    var res = v
-    for k in 0 ..< keep.tail.count:
-      appendCopy(res, keep.tail.elemArr[k])
-    v = move(res)
+    when supportsCopyMem(T):
+      v.add(toOpenArray(keep.tail.elemArr, 0, keep.tail.count - 1))
+    else:
+      # Few elements: append them through a copy so a failing element copy
+      # leaves `v` unchanged.
+      var res = v
+      for k in 0 ..< keep.tail.count:
+        appendCopy(res, keep.tail.elemArr[k])
+      v = move(res)
     return
-  # Build the left tree (`v` with its tail pushed in) without touching `v`.
+  # The left tree is `v` with its tail pushed in.
   var left: FlexVec[T]
   left.root = v.root
   left.shift = v.shift
-  if left.root != nil:
-    retain(left.root)
-  retain(v.tail)
-  pushLeaf(left.root, left.shift, v.tail)
+  when supportsCopyMem(T):
+    # Concatenation cannot fail part way, so hand `v`'s references to the
+    # left tree; nodes only `v` owns are then edited in place.
+    v.root = nil
+    pushLeaf(left.root, left.shift, v.tail)
+    v.tail = nil
+  else:
+    # An element copy may fail, so leave `v` untouched until the end.
+    if left.root != nil:
+      retain(left.root)
+    retain(v.tail)
+    pushLeaf(left.root, left.shift, v.tail)
   let (root, shift) = concatTrees(left.root, left.shift, keep.root, keep.shift)
   release(v.root)
   release(v.tail)
