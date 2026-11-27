@@ -297,9 +297,10 @@ Offsets count bytes, as with `string`; keep them on UTF-8 code point
 boundaries. Indexing a single byte is O(log n), so for short strings that
 are mostly read, `ImmStr` or `string` is faster.
 
-[docs/benchmark_std_string.md](docs/benchmark_std_string.md) compares
-`string`, `ImmStr` and `FlexStr` across copying, hashing, reading, building
-and editing, with a summary of when to use which.
+The string benchmarks compare `string`, `ImmStr` and `FlexStr` across
+copying, hashing, reading, building, and editing.
+[arm64 (macOS)](docs/benchmark_std_string_arm64.md) ·
+[amd64 (FreeBSD)](docs/benchmark_std_string_amd64.md)
 
 API: `toFlexStr`, `len`, `[]` (also `^i` and slices), `take`, `drop`, `&`,
 `add`, `insert`, `erase`, `replace`, `isEmpty`, `$`, `toImmStr`, `items`,
@@ -337,6 +338,10 @@ thread-local container types.
 | `TrieMap` with `string`, `ImmStr`, or `FlexStr` keys | Object |
 | `TrieMap` with other key types | Array of `[key, value]` pairs |
 | `Box` | `[]` when empty, `[value]` when populated |
+
+The JSON benchmarks cover text I/O, typed conversions, and edit history.
+[arm64 (macOS)](docs/benchmark_jsonutils_arm64.md) ·
+[amd64 (FreeBSD)](docs/benchmark_jsonutils_amd64.md)
 
 ## Box
 

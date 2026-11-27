@@ -1,4 +1,4 @@
-import std/[hashes, json, options, tables, unittest]
+import std/[hashes, json, options, strutils, tables, unittest]
 import std/jsonutils as stdJsonUtils
 import thetos
 import thetos/jsonutils as persistent
@@ -100,6 +100,42 @@ suite "Persistent JsonValue":
     restored["items"].add(newJInt(2))
     check stable["word"].getStr == "before" and stable["items"].len == 1
     check toJsonValue(nil).kind == JNull
+
+  test "text I/O handles escaped keys, all control bytes and numeric tokens":
+    var escaped = "quotes \" and backslash \\ with 🌍"
+    for i in 0 ..< 32:
+      escaped.add(char(i))
+    let text = "{" & json.escapeJson(escaped) & ":" & json.escapeJson(escaped) & "}"
+    let parsed = parseJsonValue(text)
+    check parsed[escaped].getStr == escaped
+    check $parsed == text
+    let numeric =
+      "/* values */ [-9223372036854775808, -0.0, 3.25e5, false, true, null,]"
+    check parseJsonValue(numeric) == toJsonValue(json.parseJson(numeric))
+    check parseJsonValue($parseJsonValue(numeric)) == parseJsonValue(numeric)
+
+  test "malformed and deeply nested text release partial trees":
+    let baseline = liveAllocations()
+    for text in [
+      "", "[1] true", "{1:2}", """{"a" 1}""", "[1 2]", """{"ok":["saved"],"bad":[1}"""
+    ]:
+      expect JsonParsingError:
+        discard parseJsonValue(text)
+    expect JsonParsingError:
+      discard parseJsonValue(repeat('[', 1002) & "0" & repeat(']', 1002))
+    check liveAllocations() == baseline
+
+  test "a too-deep stdlib tree releases partially converted nodes":
+    var source = newJArray()
+    for i in 0 ..< 1001:
+      var parent = newJArray()
+      parent.add(newJString("sibling"))
+      parent.add(source)
+      source = parent
+    let baseline = liveAllocations()
+    expect ValueError:
+      discard toJsonValue(source)
+    check liveAllocations() == baseline
 
   test "raw large numbers and numeric-looking strings stay distinct":
     let literal = "18446744073709551615"
