@@ -52,4 +52,4 @@ jobs:
         run: atlas-run tests --only-errors -- $NIM_ARGS
 
       - name: Run container tests with -d:thetosSingleThread
-        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tbox -- $NIM_ARGS -d:thetosSingleThread
+        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tflexvec tbox -- $NIM_ARGS -d:thetosSingleThread
