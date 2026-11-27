@@ -295,6 +295,48 @@ assert added == @[9]
 
 API: `initAtom`, `load`, `store`, `exchange`, `update`.
 
+### AtomRef
+
+An `Atom` is a location, so it cannot be copied or passed around.
+`AtomRef[T]` is a reference-counted handle to one shared atom: copies are
+O(1) and share it, so you can store a handle in other objects or give one
+to each thread, and every holder sees every update. The atom is freed when
+the last handle goes away. This is what `std::shared_ptr<immer::atom<T>>`
+does in C++.
+
+Each store also bumps a version counter. A holder that keeps a snapshot can
+call `refresh` as often as it likes: it costs one atomic read, and reloads
+the snapshot only when something was stored since.
+
+```nim
+import std/typedthreads
+import thetos
+
+let settings = newAtomRef(toTrieMap({"mode": "fast"}))
+
+proc worker(s: AtomRef[TrieMap[string, string]]) {.thread.} =
+  var snapshot: TrieMap[string, string]
+  var seen = -1                          # forces the first load
+  while true:
+    if s.refresh(snapshot, seen):        # reloads only after a store
+      if snapshot.getOrDefault("mode") == "stop":
+        break
+
+var t: Thread[AtomRef[TrieMap[string, string]]]
+createThread(t, worker, settings)        # the thread gets its own handle
+settings.update do (m: TrieMap[string, string]) -> TrieMap[string, string]:
+  m.put("mode", "stop")
+joinThread(t)
+assert settings.version == 1
+```
+
+`AtomRef` has the same `load`, `store`, `exchange` and `update` as `Atom`,
+and the same compile-time check on what `T` may hold. `==` and `hash`
+compare which atom two handles refer to, not the values.
+
+API: `newAtomRef`, `load`, `store`, `exchange`, `update`, `version`,
+`refresh`, `isNil`, `==`, `hash`, `$`.
+
 ## Thread-safety contract
 
 * Containers can be shared and copied between threads freely. A copy is an

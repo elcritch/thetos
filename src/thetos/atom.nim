@@ -24,7 +24,9 @@
 ## pointer equality identifies one installation and avoids ABA.
 ##
 ## An `Atom` is a location, not a value: it cannot be copied. Keep it in a
-## global, an object shared by pointer, or `createShared` memory.
+## global, an object shared by pointer, or `createShared` memory, or use
+## `AtomRef[T]`: a reference-counted handle whose copies share one atom, with
+## a version counter so holders can cheaply check for new stores.
 
 runnableExamples:
   import thetos/triemap
@@ -35,7 +37,7 @@ runnableExamples:
   )
   assert counts.load()["hits"] == 1
 
-import std/[atomics, typetraits]
+import std/[atomics, hashes, typetraits]
 import ./private/[core, reftraits]
 
 type
@@ -215,3 +217,134 @@ proc update*[T, F](a: var Atom[T], f: F): T {.discardable.} =
         retireCell[T](expected)
         return
     retireCell[T](packCell(next))
+
+# AtomRef -----------------------------------------------------------------
+
+type
+  AtomRefNode[T] = object
+    rc*: DefaultRc # exported for the generic refcount helpers in core
+    version: Atomic[int]
+    atom: Atom[T]
+
+  AtomRef*[T] = object
+    ## Copyable handle to one shared `Atom[T]`. Copies are O(1) and share
+    ## the atom, so every holder sees every update. `default(AtomRef[T])` is
+    ## a nil handle; create one with `newAtomRef`.
+    node: ptr AtomRefNode[T]
+
+proc `=destroy`*[T](r: AtomRef[T]) =
+  if r.node != nil and dropRef(r.node):
+    {.cast(raises: []), cast(gcsafe).}:
+      `=destroy`(r.node.atom)
+    freeAlignedRaw(r.node, alignof(AtomRefNode[T]))
+
+proc `=wasMoved`*[T](r: var AtomRef[T]) =
+  r.node = nil
+
+proc `=dup`*[T](r: AtomRef[T]): AtomRef[T] =
+  if r.node != nil:
+    retain(r.node)
+  result.node = r.node
+
+proc `=copy`*[T](dst: var AtomRef[T], src: AtomRef[T]) =
+  if src.node != nil:
+    retain(src.node)
+  `=destroy`(dst)
+  dst.node = src.node
+
+proc newAtomRef*[T](value: sink T): AtomRef[T] =
+  ## Creates a handle to a new atom holding `value`.
+  runnableExamples:
+    let a = newAtomRef(1)
+    let b = a # shares the atom
+    b.store(2)
+    assert a.load() == 2
+
+  let node = cast[ptr AtomRefNode[T]](allocAlignedRaw(
+    sizeof(AtomRefNode[T]), alignof(AtomRefNode[T])
+  ))
+  initRc(node) # zeroed memory is an empty atom and version 0
+  result.node = node
+  node.atom.store(value)
+
+proc isNil*[T](r: AtomRef[T]): bool {.inline.} =
+  ## True for a default-initialized or moved-from handle.
+  r.node == nil
+
+proc raiseNilAtomRef() {.noinline, noreturn.} =
+  raise newException(ValueError, "nil AtomRef")
+
+template target[T](r: AtomRef[T]): var Atom[T] =
+  if r.node == nil:
+    raiseNilAtomRef()
+  r.node.atom
+
+template published[T](r: AtomRef[T]) =
+  # Release: a reader that sees the new version also sees the new value.
+  discard r.node.version.fetchAdd(1, moRelease)
+
+proc load*[T](r: AtomRef[T]): T =
+  ## Returns the current value (a snapshot). Raises `ValueError` for a nil
+  ## handle, as do the other operations.
+  target(r).load()
+
+proc store*[T](r: AtomRef[T], value: sink T) =
+  ## Replaces the value.
+  target(r).store(value)
+  published(r)
+
+proc exchange*[T](r: AtomRef[T], value: sink T): T =
+  ## Stores `value` and returns the previous value.
+  result = target(r).exchange(value)
+  published(r)
+
+proc update*[T, F](r: AtomRef[T], f: F): T {.discardable.} =
+  ## Atomically replaces the value `x` with `f(x)` and returns the stored
+  ## value, like `Atom.update`. `f` may run several times under contention.
+  result = target(r).update(f)
+  published(r)
+
+proc version*[T](r: AtomRef[T]): int =
+  ## Number of stores so far. Read it before `load`ing to know that the
+  ## snapshot is at least that recent; `refresh` does this for you.
+  if r.node == nil:
+    raiseNilAtomRef()
+  r.node.version.load(moAcquire)
+
+proc refresh*[T](r: AtomRef[T], snapshot: var T, seen: var int): bool =
+  ## Reloads `snapshot` if the atom has been stored to since version `seen`,
+  ## and returns true when it did. Checking costs one atomic read, so
+  ## holders can call it often and reload only on change. Start `seen` at
+  ## -1 to force the first load.
+  runnableExamples:
+    let counter = newAtomRef(0)
+    var snapshot: int
+    var seen = -1
+    assert counter.refresh(snapshot, seen) # first load
+    assert not counter.refresh(snapshot, seen) # nothing changed
+    counter.store(5)
+    assert counter.refresh(snapshot, seen) and snapshot == 5
+
+  let current = r.version
+  if current == seen:
+    return false
+  snapshot = r.load()
+  seen = current
+  true
+
+proc `==`*[T](a, b: AtomRef[T]): bool {.inline.} =
+  ## True when both handles refer to the same atom.
+  a.node == b.node
+
+proc hash*[T](r: AtomRef[T]): Hash =
+  ## Hash of the atom's identity, not of its value.
+  hash(cast[pointer](r.node))
+
+proc `$`*[T](r: AtomRef[T]): string =
+  if r.node == nil:
+    "AtomRef(nil)"
+  else:
+    var s = "AtomRef("
+    s.addQuoted r.load()
+    s.add ")"
+    s

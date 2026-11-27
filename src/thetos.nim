@@ -8,7 +8,8 @@
 ##   O(log n) concatenation and slicing
 ## * `Box[T] <thetos/box.html>`_: shared immutable value
 ## * `Atom[T] <thetos/atom.html>`_: lock-free cell for publishing new
-##   versions between threads
+##   versions between threads, and `AtomRef[T]`, a copyable handle to one
+##   shared atom
 ##
 ## All containers are value types with O(1) copies and structural sharing.
 ## Nodes use atomic reference counts and are never mutated while shared,
