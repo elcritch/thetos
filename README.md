@@ -75,9 +75,9 @@ Once a version is shared, its nodes are path-copied.
 
 * `TrieMap`: `initTrieMap`, `toTrieMap`, `len`, `contains`/`in`, `[]` (raises
   `KeyError`), `getOrDefault`, `get` (`Option`), `[]=`, `del`, `put`,
-  `erase`, `update`, `pairs`, `keys`, `values`, `==`, `hash`, `$`.
+  `erase`, `update`, `pairs`, `keys`, `values`, `diff`, `==`, `hash`, `$`.
 * `TrieSet`: `initTrieSet`, `toTrieSet`, `len`, `contains`, `incl`, `excl`, `insert`,
-  `erase`, `items`, `+`, `*`, `-`, `<=`, `==`, `hash`, `$`.
+  `erase`, `items`, `diff`, `+`, `*`, `-`, `<=`, `==`, `hash`, `$`.
 * `TrieVec`: `initTrieVec`, `toTrieVec`, `len`, `[]` (also `^i`), `first`,
   `last`, `[]=`, `add`, `pop`, `pushBack`, `popBack`, `put`, `update`,
   `take`, `&`, `items`, `pairs`, `==`, `hash`, `$`.
@@ -88,6 +88,18 @@ Once a version is shared, its nodes are path-copied.
 
 Iterators walk a snapshot, so reassigning the source variable inside the
 loop is safe.
+
+`diff(a, b)` yields the keys added, removed or changed (maps only) between
+two versions of a map or set, after `immer::diff`. It skips every subtree the
+two versions still share, so comparing a version with one derived from it
+costs time proportional to the number of changes, not the size:
+
+```nim
+let before = state.load()
+# ... other threads publish updates ...
+for d in diff(before, state.load()):
+  echo d.kind, " ", d.key   # dkAdded, dkRemoved or dkChanged
+```
 
 ## Thread-safety contract
 
@@ -127,12 +139,6 @@ iteration and building a container you own alone barely changed.
 With the flag set, sharing any thetos value between threads is a data race.
 The compiler cannot detect it, so only use the flag when the whole program
 keeps thetos values on one thread.
-
-## Not (yet) ported from immer
-
-`flex_vector` (RRB trees with O(log n) concatenation and slicing),
-`array`, `table`, explicit transient types (unique ownership already gives
-in-place updates), custom memory policies, and diffing.
 
 ## Development
 

@@ -203,3 +203,112 @@ suite "TrieMap":
     for i in 0 ..< 100_000:
       m[i] = i
     check m.depth <= 9 # log32(100k) ~ 4, plus random prefix collisions
+
+type CountedKey = object
+  ## Key that counts `==` calls, to check shared subtrees are skipped.
+  id: int
+
+var keyCompares = 0
+
+proc hash(k: CountedKey): Hash =
+  hash(k.id)
+
+proc `==`(a, b: CountedKey): bool =
+  inc keyCompares
+  a.id == b.id
+
+proc `<`(a, b: BadKey): bool =
+  a.id < b.id
+
+proc diffOf[K, V](a, b: TrieMap[K, V]): seq[(DiffKind, K, V, V)] =
+  for d in diff(a, b):
+    result.add (d.kind, d.key, d.oldValue, d.newValue)
+  result.sort()
+
+proc expectedDiff[K, V](a, b: Table[K, V]): seq[(DiffKind, K, V, V)] =
+  for k, v in a:
+    if not b.hasKey(k):
+      result.add (dkRemoved, k, v, default(V))
+    elif b[k] != v:
+      result.add (dkChanged, k, v, b[k])
+  for k, v in b:
+    if not a.hasKey(k):
+      result.add (dkAdded, k, default(V), v)
+  result.sort()
+
+proc toModel[K, V](m: TrieMap[K, V]): Table[K, V] =
+  for k, v in m:
+    result[k] = v
+
+suite "TrieMap diff":
+  test "added, removed and changed":
+    let a = toTrieMap({1: "one", 2: "two", 3: "three"})
+    let b = a.put(2, "deux").erase(3).put(4, "four")
+    check diffOf(a, b) ==
+      @[
+        (dkAdded, 4, "", "four"),
+        (dkRemoved, 3, "three", ""),
+        (dkChanged, 2, "two", "deux"),
+      ].sorted()
+    check diffOf(b, a).len == 3
+
+  test "empty and identical maps":
+    let e = initTrieMap[int, int]()
+    let a = toTrieMap({1: 1, 2: 2})
+    check diffOf(e, e).len == 0
+    check diffOf(a, a).len == 0
+    check diffOf(e, a) == @[(dkAdded, 1, 0, 1), (dkAdded, 2, 0, 2)]
+    check diffOf(a, e) == @[(dkRemoved, 1, 1, 0), (dkRemoved, 2, 2, 0)]
+
+  test "setting an equal value is not a change":
+    let a = toTrieMap({1: "x"})
+    let b = a.put(1, "x")
+    check diffOf(a, b).len == 0
+
+  test "random edits agree with Table, shared and unshared":
+    var r = initRand(42)
+    for round in 0 ..< 40:
+      var a = initTrieMap[int, int]()
+      for i in 0 ..< r.rand(3000):
+        a[r.rand(5000)] = r.rand(9)
+      var b = a
+      for i in 0 ..< r.rand(200):
+        let k = r.rand(5000)
+        if r.rand(2) == 0:
+          b.del(k)
+        else:
+          b[k] = r.rand(9)
+      let want = expectedDiff(a.toModel, b.toModel)
+      check diffOf(a, b) == want
+      # Same contents rebuilt from scratch share no nodes with `a`.
+      var fresh = initTrieMap[int, int]()
+      for k, v in b:
+        fresh[k] = v
+      check diffOf(a, fresh) == want
+
+  test "colliding hashes":
+    var r = initRand(7)
+    for round in 0 ..< 40:
+      var a = initTrieMap[BadKey, int]()
+      for i in 0 ..< r.rand(40):
+        a[BadKey(id: r.rand(60))] = r.rand(3)
+      var b = a
+      for i in 0 ..< r.rand(20):
+        let k = BadKey(id: r.rand(60))
+        if r.rand(2) == 0:
+          b.del(k)
+        else:
+          b[k] = r.rand(3)
+      check diffOf(a, b) == expectedDiff(a.toModel, b.toModel)
+
+  test "shared subtrees are skipped":
+    var a = initTrieMap[CountedKey, int]()
+    for i in 0 ..< 100_000:
+      a[CountedKey(id: i)] = i
+    let b = a.put(CountedKey(id: 500), -1).put(CountedKey(id: 100_001), 1)
+    keyCompares = 0
+    var n = 0
+    for d in diff(a, b):
+      inc n
+    check n == 2
+    check keyCompares < 100

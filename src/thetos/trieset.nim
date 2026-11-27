@@ -16,10 +16,15 @@ runnableExamples:
 
 import std/hashes
 import ./private/[core, champ]
+export DiffKind
 
 type
   SetEntry[T] = object
     key: T
+
+  SetDiff*[T] = object ## One difference between two sets, from `diff`.
+    kind*: DiffKind ## `dkAdded` or `dkRemoved`
+    item*: T
 
   TrieSet*[T] = object ## Immutable, structurally shared hash set with value semantics.
     root: ChampPtr[SetEntry[T]]
@@ -97,6 +102,28 @@ proc `<=`*[T](a, b: TrieSet[T]): bool =
     if e.key notin b:
       return false
   true
+
+iterator diff*[T](a, b: TrieSet[T]): SetDiff[T] =
+  ## Yields every item added in `b` or removed from `a`. Parts of the two
+  ## sets that are still shared are skipped without being visited, so
+  ## diffing two versions costs time proportional to how much changed. The
+  ## order is unspecified.
+  runnableExamples:
+    let a = toTrieSet([1, 2, 3])
+    let b = a.erase(1).insert(4)
+    var changes: seq[(DiffKind, int)]
+    for d in diff(a, b):
+      changes.add (d.kind, d.item)
+    assert changes.len == 2
+    assert (dkRemoved, 1) in changes and (dkAdded, 4) in changes
+
+  let ka = `=dup`(a) # walk snapshots even if `a` or `b` is reassigned
+  let kb = `=dup`(b)
+  for (old, new) in champDiff(ka.root, kb.root):
+    if old == nil:
+      yield SetDiff[T](kind: dkAdded, item: new.key)
+    elif new == nil:
+      yield SetDiff[T](kind: dkRemoved, item: old.key)
 
 proc `==`*[T](a, b: TrieSet[T]): bool =
   a.size == b.size and a <= b

@@ -24,11 +24,18 @@ runnableExamples:
 
 import std/[hashes, options]
 import ./private/[core, champ]
+export DiffKind
 
 type
   MapEntry[K, V] = object
     key: K
     value: V
+
+  MapDiff*[K, V] = object ## One difference between two maps, from `diff`.
+    kind*: DiffKind
+    key*: K
+    oldValue*: V ## value in the first map; `default(V)` when `dkAdded`
+    newValue*: V ## value in the second map; `default(V)` when `dkRemoved`
 
   TrieMap*[K, V] = object
     ## Immutable, structurally shared hash map with value semantics.
@@ -148,6 +155,35 @@ iterator values*[K, V](m: TrieMap[K, V]): lent V =
   let keep = `=dup`(m)
   for e in champEntries(keep.root):
     yield e.value
+
+iterator diff*[K, V](a, b: TrieMap[K, V]): MapDiff[K, V] =
+  ## Yields every key that differs between `a` and `b`: added in `b`,
+  ## removed from `a`, or present in both with values that are not `==`.
+  ## Parts of the two maps that are still shared (for example when `b` was
+  ## derived from `a`) are skipped without being visited, so diffing two
+  ## versions costs time proportional to how much changed. The order is
+  ## unspecified.
+  runnableExamples:
+    let a = toTrieMap({1: "one", 2: "two"})
+    let b = a.put(2, "deux").put(3, "trois")
+    var changes: seq[(DiffKind, int)]
+    for d in diff(a, b):
+      changes.add (d.kind, d.key)
+    assert changes.len == 2
+    assert (dkChanged, 2) in changes and (dkAdded, 3) in changes
+
+  mixin `==`
+  let ka = `=dup`(a) # walk snapshots even if `a` or `b` is reassigned
+  let kb = `=dup`(b)
+  for (old, new) in champDiff(ka.root, kb.root):
+    if old == nil:
+      yield MapDiff[K, V](kind: dkAdded, key: new.key, newValue: new.value)
+    elif new == nil:
+      yield MapDiff[K, V](kind: dkRemoved, key: old.key, oldValue: old.value)
+    elif not (old.value == new.value):
+      yield MapDiff[K, V](
+        kind: dkChanged, key: old.key, oldValue: old.value, newValue: new.value
+      )
 
 proc `==`*[K, V](a, b: TrieMap[K, V]): bool =
   if a.root == b.root:
