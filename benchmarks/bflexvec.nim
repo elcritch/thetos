@@ -88,6 +88,33 @@ for n in sizes:
     for r in 0 ..< reps:
       sink0 += hash(b)
 
+section("Indexing")
+for n in sizes:
+  let a = regular(n)
+  let b = relaxed(n)
+  const N = 10_000_000
+  var idx = newSeq[int](4096)
+  for k in 0 ..< idx.len:
+    idx[k] = next(n)
+  bench("v[i] random, regular, " & $n, N):
+    for k in 0 ..< N:
+      sink0 += a[idx[k and 4095]]
+  bench("v[i] random, relaxed, " & $n, N):
+    for k in 0 ..< N:
+      sink0 += b[idx[k and 4095]]
+  bench("v[i] sequential, regular, " & $n, N):
+    var i = 0
+    for k in 0 ..< N:
+      sink0 += a[i]
+      inc i
+      if i == n:
+        i = 0
+  bench("v[i] = x random, unique, " & $n, N div 10):
+    var v = a
+    for k in 0 ..< N div 10:
+      v[idx[k and 4095]] = k
+    sink0 += v[0]
+
 section("Concatenation")
 for n in sizes:
   let a = regular(n)
