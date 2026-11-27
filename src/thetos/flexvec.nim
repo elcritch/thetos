@@ -34,7 +34,7 @@ runnableExamples:
     d = d.pushFront(i) # amortized O(1)
   assert d.len == 8 and d[0] == -2 and d.drop(3) == b
 
-import std/[hashes, options, typetraits]
+import std/[hashes, macros, options, typetraits]
 import ./private/core
 import ./trievec
 

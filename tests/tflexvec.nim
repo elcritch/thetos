@@ -30,6 +30,23 @@ when testDeque:
   proc toFlexVec[T](t: TrieVec[T]): FlexVec[T] =
     toFlexDeque(t)
 
+type Digit = range[0'u8 .. 9'u8]
+
+proc `==`(a, b: Digit): bool =
+  ord(a) mod 2 == ord(b) mod 2
+
+type ComparedElement = object
+  value: int
+
+var comparedLeft, comparedRight: FlexVec[ComparedElement]
+var comparisonCount: int
+
+proc `==`(a, b: ComparedElement): bool =
+  inc comparisonCount
+  reset(comparedLeft)
+  reset(comparedRight)
+  a.value == b.value
+
 proc toSeq[T](v: FlexVec[T]): seq[T] =
   for x in v:
     result.add x
@@ -72,7 +89,7 @@ suite "FlexVec":
 
   test "basic API":
     var v = toFlexVec([1, 2, 3])
-    let w = v.pushBack(4)
+    let w = pushBack[int](v, 4)
     v[0] = 10
     check v == toFlexVec([10, 2, 3])
     check w == toFlexVec([1, 2, 3, 4])
@@ -93,6 +110,26 @@ suite "FlexVec":
     check pairs == @[(0, 1), (1, 2), (2, 3), (3, 4)]
     check hash(toFlexVec([1, 2])) == hash(toFlexVec([1, 2]))
     check toFlexVec(["a"]) & toFlexVec(["b"]) == toFlexVec(["a", "b"])
+
+  when not testDeque:
+    test "explicit type arguments work for vector operations":
+      proc doubled(x: int): int =
+        x * 2
+
+      var v = toFlexVec([1, 2, 3])
+      let w = `[]`[int, int, int](v, 1 .. 2)
+      let joined = `&`[int](v, w)
+      add[int](v, w)
+      check `==`[int](v, joined)
+      check update[int, typeof(doubled)](w, 0, doubled) == toFlexVec([4, 3])
+      check updateIt[int](w, 0, it * 2) == toFlexVec([4, 3])
+      when not defined(thetosTestLocal):
+        let append = flexvec.pushBack[int]
+        check append(w, 4) == toFlexVec([2, 3, 4])
+      var seen: seq[int]
+      for x in items[int](w):
+        seen.add x
+      check seen == @[2, 3]
 
   test "flex operations":
     let v = rangeVec(0, 100)
@@ -149,6 +186,34 @@ suite "FlexVec":
       check c == toFlexVec(model) and toFlexVec(model) == c
       model[^1] = '!'
       check c != toFlexVec(model)
+
+  test "equality checks NaN even when leaves are shared":
+    var values: array[33, float]
+    values[0] = NaN
+    let v = toFlexVec(values)
+    let changedTail = v.put(32, 1.0).put(32, 0.0)
+    let nested = toFlexVec([v])
+    let withHead = toFlexVec([1.0, 2.0]).pushFront(NaN)
+    check v != v
+    check v != changedTail and changedTail != v
+    check nested != nested
+    check withHead != withHead.put(2, 2.0)
+    check toFlexVec([0.0]) == toFlexVec([-0.0])
+
+  test "equality uses the element comparator for one-byte ranges":
+    check toFlexVec([Digit(1)]) == toFlexVec([Digit(3)])
+    check toFlexVec([Digit(1)]) != toFlexVec([Digit(2)])
+
+  test "equality keeps the compared versions alive during reassignment":
+    checkNoLeaks:
+      comparisonCount = 0
+      for i in 0 ..< 65:
+        comparedLeft.add ComparedElement(value: i)
+        comparedRight.add ComparedElement(value: i)
+      let equal = comparedLeft == comparedRight
+      check equal
+      check comparisonCount == 65
+      check comparedLeft.len == 0 and comparedRight.len == 0
 
   test "converts from TrieVec":
     let t = toTrieVec([1, 2, 3, 4])
@@ -512,6 +577,11 @@ suite "FlexVec get":
 
 when not testDeque:
   suite "FlexVec and FlexDeque together":
+    test "equality checks NaN in nodes shared across container types":
+      let v = toFlexVec([NaN])
+      let d = toFlexDeque(v)
+      check v != d and d != v
+
     test "conversions share nodes and keep the elements":
       checkNoLeaks:
         let v = rangeVec(0, 2000)
@@ -547,3 +617,12 @@ when not testDeque:
         var emptyDeque: FlexDeque[int]
         emptyDeque.add(v)
         check emptyDeque == v
+
+proc `==`(a, b: byte): bool =
+  ord(a) + 2 == ord(b)
+
+suite "FlexVec custom byte equality":
+  test "byte overrides apply to both independent and shared leaves":
+    let v = toFlexVec([1'u8])
+    check v == toFlexVec([3'u8])
+    check v != v

@@ -1,5 +1,5 @@
 # Included by the container modules and by `thetos/local`; not a module.
-# The including module imports `std/[hashes, options, typetraits]` and
+# The including module imports `std/[hashes, macros, options, typetraits]` and
 # `private/core`, and declares `RcCount`, the type of each node's `rc`.
 
 const
@@ -52,6 +52,9 @@ type
 
 template hasHead(H: typedesc): bool =
   H is FlexWithHead
+
+# Public operations default to the vector layout for calls with explicit
+# element types. The layout is inferred from the operands in ordinary calls.
 
 # Inner nodes: header | children: array[32, ptr] | sizes: array[32, int].
 # `sizes[k]` is the number of elements in children 0..k; it is only
@@ -198,13 +201,13 @@ proc ensureOwned[T](slot: var FlexPtr[T]) =
     release(slot)
     slot = c
 
-proc `=destroy`*[T, H](v: FlexImpl[T, H]) =
+proc `=destroy`*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]) =
   release(v.root)
   release(v.tail)
   when hasHead(H):
     release(v.head)
 
-proc `=wasMoved`*[T, H](v: var FlexImpl[T, H]) =
+proc `=wasMoved`*[T; H: auto = FlexNoHead](v: var FlexImpl[T, H]) =
   v.size = 0
   v.shift = 0
   v.root = nil
@@ -212,7 +215,7 @@ proc `=wasMoved`*[T, H](v: var FlexImpl[T, H]) =
   when hasHead(H):
     v.head = nil
 
-proc `=dup`*[T, H](v: FlexImpl[T, H]): FlexImpl[T, H] =
+proc `=dup`*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): FlexImpl[T, H] =
   if v.root != nil:
     retain(v.root)
   if v.tail != nil:
@@ -226,7 +229,7 @@ proc `=dup`*[T, H](v: FlexImpl[T, H]): FlexImpl[T, H] =
       retain(v.head)
     result.head = v.head
 
-proc `=copy`*[T, H](dst: var FlexImpl[T, H], src: FlexImpl[T, H]) =
+proc `=copy`*[T; H: auto = FlexNoHead](dst: var FlexImpl[T, H], src: FlexImpl[T, H]) =
   if src.root != nil:
     retain(src.root)
   if src.tail != nil:
@@ -250,13 +253,13 @@ proc initFlexDeque*[T](): FlexDeque[T] =
   ## Returns an empty deque. `default(FlexDeque[T])` is also empty.
   discard
 
-proc len*[T, H](v: FlexImpl[T, H]): int {.inline.} =
+proc len*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): int {.inline.} =
   v.size
 
-proc high*[T, H](v: FlexImpl[T, H]): int {.inline.} =
+proc high*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): int {.inline.} =
   v.size - 1
 
-proc low*[T, H](v: FlexImpl[T, H]): int {.inline.} =
+proc low*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): int {.inline.} =
   0
 
 proc headLen[T, H](v: FlexImpl[T, H]): int {.inline.} =
@@ -286,7 +289,7 @@ template checkFlexIndex(v, i: untyped) =
   if i < 0 or i >= v.size:
     raiseIndex(i, v.size)
 
-proc `[]`*[T, H](v: FlexImpl[T, H], i: Natural): lent T =
+proc `[]`*[T; H: auto = FlexNoHead](v: FlexImpl[T, H], i: Natural): lent T =
   checkFlexIndex(v, i)
   let off = v.size - v.tail.count # the tail exists once the index is valid
   if i >= off:
@@ -307,23 +310,25 @@ proc `[]`*[T, H](v: FlexImpl[T, H], i: Natural): lent T =
     s -= flexBits
   n.elemArr[idx]
 
-proc `[]`*[T, H](v: FlexImpl[T, H], i: BackwardsIndex): lent T =
+proc `[]`*[T; H: auto = FlexNoHead](v: FlexImpl[T, H], i: BackwardsIndex): lent T =
   v[v.size - int(i)]
 
-proc first*[T, H](v: FlexImpl[T, H]): lent T =
+proc first*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): lent T =
   v[0]
 
-proc last*[T, H](v: FlexImpl[T, H]): lent T =
+proc last*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): lent T =
   v[v.size - 1]
 
-proc get*[T, H](v: FlexImpl[T, H], i: int): Option[T] =
+proc get*[T; H: auto = FlexNoHead](v: FlexImpl[T, H], i: int): Option[T] =
   ## Element `i`, or `none` when `i` is out of range (including negative).
   if i >= 0 and i < v.len:
     option(ownedCopy(v[i]))
   else:
     none(T)
 
-proc getOrDefault*[T, H](v: FlexImpl[T, H], i: int, def: T = default(T)): T =
+proc getOrDefault*[T; H: auto = FlexNoHead](
+    v: FlexImpl[T, H], i: int, def: T = default(T)
+): T =
   ## Element `i`, or `def` when `i` is out of range (including negative).
   if i >= 0 and i < v.len:
     v[i]
@@ -395,7 +400,7 @@ proc normalize[T](root: var FlexPtr[T], shift: var int) =
 proc raiseFlexOverflow() {.noinline, noreturn.} =
   raise newException(OverflowDefect, "FlexVec length exceeds high(int)")
 
-proc add*[T, H](v: var FlexImpl[T, H], x: sink T) =
+proc add*[T; H: auto = FlexNoHead](v: var FlexImpl[T, H], x: sink T) =
   ## Appends `x` to this vector value only; other copies are not affected.
   # Keep the incoming value owned locally while a shared leaf is copied.
   var value = x
@@ -415,7 +420,7 @@ proc add*[T, H](v: var FlexImpl[T, H], x: sink T) =
   inc v.tail.count
   inc v.size
 
-proc add*[T, H](v: var FlexImpl[T, H], xs: openArray[T]) =
+proc add*[T; H: auto = FlexNoHead](v: var FlexImpl[T, H], xs: openArray[T]) =
   ## Appends every element of `xs` to this vector value only.
   if xs.len > high(int) - v.size:
     raiseFlexOverflow()
@@ -444,7 +449,7 @@ proc assocRec[T](slot: var FlexPtr[T], s, idx: int, value: var T) =
     let (j, local) = findChild(slot, s, idx)
     assocRec(slot.childArr[j], s - flexBits, local, value)
 
-proc `[]=`*[T, H](v: var FlexImpl[T, H], i: Natural, x: sink T) =
+proc `[]=`*[T; H: auto = FlexNoHead](v: var FlexImpl[T, H], i: Natural, x: sink T) =
   ## Replaces element `i` in this vector value only.
   var value = x
   defer:
@@ -804,7 +809,7 @@ proc concatTrees[T](
   normalize(root, shift)
   (root, shift)
 
-proc add*[T, H, G](v: var FlexImpl[T, H], w: FlexImpl[T, G]) =
+proc add*[T; H, G: auto = FlexNoHead](v: var FlexImpl[T, H], w: FlexImpl[T, G]) =
   ## Appends every element of `w` to this vector value only, in O(log n).
   if w.size > high(int) - v.size:
     raiseFlexOverflow()
@@ -907,13 +912,15 @@ proc prepend[T](v: var FlexDeque[T], x: sink T) =
   inc v.head.count
   inc v.size
 
-proc `&`*[T, H, G](a: sink FlexImpl[T, H], b: FlexImpl[T, G]): FlexImpl[T, H] =
+proc `&`*[T; H, G: auto = FlexNoHead](
+    a: sink FlexImpl[T, H], b: FlexImpl[T, G]
+): FlexImpl[T, H] =
   ## Concatenation in O(log n). The result has the type of `a`.
   result = a
   resetOnError(result):
     result.add(b)
 
-proc pop*[T, H](v: var FlexImpl[T, H]): T =
+proc pop*[T; H: auto = FlexNoHead](v: var FlexImpl[T, H]): T =
   ## Removes and returns the last element.
   if v.size == 0:
     raiseIndex(0, 0)
@@ -925,13 +932,23 @@ proc pop*[T, H](v: var FlexImpl[T, H]): T =
       result = v.tail.elemArr[c - 1]
     truncate(v, v.size - 1)
 
-proc pushBack*[T, H](v: sink FlexImpl[T, H], x: sink T): FlexImpl[T, H] =
-  ## Returns a vector with `x` appended.
+proc pushBackImpl[T, H](v: sink FlexImpl[T, H], x: sink T): FlexImpl[T, H] =
   result = v
   resetOnError(result):
     result.add(x)
 
-proc pushFront*[T, H](v: sink FlexImpl[T, H], x: sink T): FlexImpl[T, H] =
+proc pushBack*[T](v: sink FlexVec[T], x: sink T): FlexVec[T] {.inline.} =
+  ## Returns a vector with `x` appended.
+  # Keep pushBack[T] usable as a concrete proc value for FlexVec callers.
+  pushBackImpl(v, x)
+
+proc pushBack*[T](v: sink FlexImpl[T, auto], x: sink T): auto {.inline.} =
+  ## Returns a vector or deque with `x` appended.
+  pushBackImpl(v, x)
+
+proc pushFront*[T; H: auto = FlexNoHead](
+    v: sink FlexImpl[T, H], x: sink T
+): FlexImpl[T, H] =
   ## Returns a vector with `x` prepended: O(log n) for a `FlexVec`, amortized
   ## O(1) for a `FlexDeque`.
   when hasHead(H):
@@ -943,7 +960,7 @@ proc pushFront*[T, H](v: sink FlexImpl[T, H], x: sink T): FlexImpl[T, H] =
       result.add(x)
       result.add(v)
 
-proc popBack*[T, H](v: sink FlexImpl[T, H]): FlexImpl[T, H] =
+proc popBack*[T; H: auto = FlexNoHead](v: sink FlexImpl[T, H]): FlexImpl[T, H] =
   ## Returns a vector without its last element.
   if v.size == 0:
     raiseIndex(0, 0)
@@ -951,20 +968,26 @@ proc popBack*[T, H](v: sink FlexImpl[T, H]): FlexImpl[T, H] =
   resetOnCopyError(T, result):
     truncate(result, result.size - 1)
 
-proc put*[T, H](v: sink FlexImpl[T, H], i: Natural, x: sink T): FlexImpl[T, H] =
+proc put*[T; H: auto = FlexNoHead](
+    v: sink FlexImpl[T, H], i: Natural, x: sink T
+): FlexImpl[T, H] =
   ## Returns a vector with element `i` replaced by `x`.
   result = v
   resetOnError(result):
     result[i] = x
 
-proc update*[T, F, H](v: sink FlexImpl[T, H], i: Natural, f: F): FlexImpl[T, H] =
+proc update*[T, F; H: auto = FlexNoHead](
+    v: sink FlexImpl[T, H], i: Natural, f: F
+): FlexImpl[T, H] =
   ## Returns a vector with element `i` replaced by `f(v[i])`.
   result = v
   resetOnError(result):
     let next = f(result[i])
     result[i] = next
 
-template updateIt*(v: FlexImpl, i: Natural, op: untyped): untyped =
+template updateIt*[T; H: auto = FlexNoHead](
+    v: FlexImpl[T, H], i: Natural, op: untyped
+): FlexImpl[T, H] =
   ## Like `update`, with the new element given as an expression of `it`,
   ## the current element: `v.updateIt(2, it * 10)`.
   block:
@@ -978,19 +1001,25 @@ template updateIt*(v: FlexImpl, i: Natural, op: untyped): untyped =
       updated[index] = move(next)
     updated
 
-proc take*[T, H](v: sink FlexImpl[T, H], n: Natural): FlexImpl[T, H] =
+proc take*[T; H: auto = FlexNoHead](
+    v: sink FlexImpl[T, H], n: Natural
+): FlexImpl[T, H] =
   ## Returns the first `n` elements, in O(log n).
   result = v
   resetOnError(result):
     truncate(result, n)
 
-proc drop*[T, H](v: sink FlexImpl[T, H], n: Natural): FlexImpl[T, H] =
+proc drop*[T; H: auto = FlexNoHead](
+    v: sink FlexImpl[T, H], n: Natural
+): FlexImpl[T, H] =
   ## Returns all but the first `n` elements, in O(log n).
   result = v
   resetOnError(result):
     dropFront(result, n)
 
-proc `[]`*[T; U, V: Ordinal, H](v: FlexImpl[T, H], s: HSlice[U, V]): FlexImpl[T, H] =
+proc `[]`*[T; U, V: Ordinal, H: auto = FlexNoHead](
+    v: FlexImpl[T, H], s: HSlice[U, V]
+): FlexImpl[T, H] =
   ## Returns elements `s.a .. s.b` (`^i` indices allowed), in O(log n).
   let a = (when U is BackwardsIndex: v.size - int(s.a) else: int(s.a))
   let b = (when V is BackwardsIndex: v.size - int(s.b) else: int(s.b))
@@ -1005,7 +1034,9 @@ proc `[]`*[T; U, V: Ordinal, H](v: FlexImpl[T, H], s: HSlice[U, V]): FlexImpl[T,
     dropFront(result, a)
     truncate(result, b - a + 1)
 
-proc insert*[T, H](v: sink FlexImpl[T, H], i: Natural, x: sink T): FlexImpl[T, H] =
+proc insert*[T; H: auto = FlexNoHead](
+    v: sink FlexImpl[T, H], i: Natural, x: sink T
+): FlexImpl[T, H] =
   ## Returns a vector with `x` inserted before element `i` (`i == len`
   ## appends), in O(log n).
   result = v
@@ -1021,7 +1052,9 @@ proc insert*[T, H](v: sink FlexImpl[T, H], i: Natural, x: sink T): FlexImpl[T, H
         result.add(move(value))
         result.add(right)
 
-proc erase*[T, H](v: sink FlexImpl[T, H], i: Natural): FlexImpl[T, H] =
+proc erase*[T; H: auto = FlexNoHead](
+    v: sink FlexImpl[T, H], i: Natural
+): FlexImpl[T, H] =
   ## Returns a vector without element `i`, in O(log n).
   result = v
   resetOnError(result):
@@ -1086,11 +1119,11 @@ proc firstLeaf[T, H](
 ): FlexPtr[T] {.inline.} =
   # The caller owns the vector throughout the walk.
   when hasHead(H):
-    if v.head != nil:
+    if not v.head.isNil:
       c.tail = v.tail
       c.root = v.root
       return v.head
-  if v.root == nil:
+  if v.root.isNil:
     return v.tail
   c.tail = v.tail
   c.descendLeft(v.root)
@@ -1104,14 +1137,16 @@ proc nextLeaf[T, H](c: var LeafCursor[T, H]): FlexPtr[T] {.inline.} =
       return c.descendLeft(parent.childArr[next])
     dec c.depth
   when hasHead(H):
-    if c.root != nil:
+    if not c.root.isNil:
       let root = c.root
       c.root = nil
       return c.descendLeft(root)
   result = c.tail
   c.tail = nil
 
-iterator chunks*[T, H](v: FlexImpl[T, H]): (ptr UncheckedArray[T], int) =
+iterator chunks*[T; H: auto = FlexNoHead](
+    v: FlexImpl[T, H]
+): (ptr UncheckedArray[T], int) =
   ## Low-level: the elements in order, as contiguous runs of up to 128 for
   ## trivially copyable one-byte elements and up to 32 otherwise. Each run
   ## is one leaf, given as a read-only pointer and a length. Retain the
@@ -1123,7 +1158,7 @@ iterator chunks*[T, H](v: FlexImpl[T, H]): (ptr UncheckedArray[T], int) =
     yield (leaf.elemArr, leaf.count)
     leaf = c.nextLeaf()
 
-iterator items*[T, H](v: FlexImpl[T, H]): lent T =
+iterator items*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): lent T =
   let keep = `=dup`(v) # iterate a snapshot even if `v` is reassigned
   var c: LeafCursor[T, H]
   var leaf = c.firstLeaf(keep)
@@ -1132,7 +1167,7 @@ iterator items*[T, H](v: FlexImpl[T, H]): lent T =
       yield leaf.elemArr[k]
     leaf = c.nextLeaf()
 
-iterator pairs*[T, H](v: FlexImpl[T, H]): (int, T) =
+iterator pairs*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): (int, T) =
   var i = 0
   for x in v:
     yield (i, x)
@@ -1151,59 +1186,91 @@ proc toFlexDeque*[T](v: TrieVec[T]): FlexDeque[T] =
     for x in v:
       appendCopy(result, x)
 
-proc `==`*[T, H, G](a: FlexImpl[T, H], b: FlexImpl[T, G]): bool =
-  ## Element-wise equality; a `FlexVec` and a `FlexDeque` may be compared.
-  if a.size != b.size:
+template elementsEqual(a, b: untyped): bool =
+  mixin `==`
+  a == b
+
+macro sameEqualityCall(actual, builtin: typed): untyped =
+  # A user template can expand to a call to system.== with different operands.
+  newLit(
+    actual.kind in nnkCallKinds and actual.len == 3 and actual[0] == builtin[0] and
+      actual[1] == builtin[1] and actual[2] == builtin[2]
+  )
+
+template usesSystemEquality(a, b: untyped): bool =
+  mixin `==`
+  sameEqualityCall(a == b, system.`==`(a, b))
+
+proc `==`*[T; H, G: auto = FlexNoHead](a: FlexImpl[T, H], b: FlexImpl[T, G]): bool =
+  ## Compares elements in order. A `FlexVec` and a `FlexDeque` may be compared.
+  ## Elements such as NaN compare unequal even when they share a leaf.
+  if not system.`==`(a.size, b.size):
     return false
-  if a.root == b.root and a.tail == b.tail:
-    when hasHead(H) and hasHead(G):
-      if a.head == b.head:
-        return true
-    elif hasHead(H):
-      if a.head == nil:
-        return true
-    elif hasHead(G):
-      if b.head == nil:
-        return true
+  # These built-in comparisons are reflexive and do not call element code.
+  # Aggregate equality can recurse into floats or a user-defined comparator.
+  const canSkipShared =
+    when T is (Ordinal | enum | set | string | cstring | pointer | ptr | ref) and
+        T isnot distinct:
+      block:
+        var left, right: T
+        usesSystemEquality(left, right)
     else:
-      return true
+      false
+  when canSkipShared:
+    if system.`==`(a.root, b.root) and system.`==`(a.tail, b.tail):
+      when hasHead(H) and hasHead(G):
+        if system.`==`(a.head, b.head):
+          return true
+      elif hasHead(H):
+        if a.head.isNil:
+          return true
+      elif hasHead(G):
+        if b.head.isNil:
+          return true
+      else:
+        return true
   # Walk both trees leaf by leaf; their leaf boundaries may differ.
   var left: LeafCursor[T, H]
   var right: LeafCursor[T, G]
-  var x = left.firstLeaf(a)
-  var y = right.firstLeaf(b)
+  when canSkipShared:
+    var x = left.firstLeaf(a)
+    var y = right.firstLeaf(b)
+  else:
+    # An element comparator can reassign either operand during the walk.
+    let keepA = `=dup`(a)
+    let keepB = `=dup`(b)
+    var x = left.firstLeaf(keepA)
+    var y = right.firstLeaf(keepB)
   var i, j: int
-  while x != nil:
+  while not x.isNil:
     let n = min(x.count - i, y.count - j)
-    let p = addr x.elemArr[i]
-    let q = addr y.elemArr[j]
-    if p != q: # a shared leaf at the same offset is equal
-      when T is char | byte | int8 | bool:
-        if not equalMem(p, q, n):
+    let xs = cast[ptr UncheckedArray[T]](addr x.elemArr[i])
+    let ys = cast[ptr UncheckedArray[T]](addr y.elemArr[j])
+    if not canSkipShared or not system.`==`(xs, ys):
+      when canSkipShared and sizeof(T) == 1:
+        if not equalMem(xs, ys, n):
           return false
       else:
-        let xs = cast[ptr UncheckedArray[T]](p)
-        let ys = cast[ptr UncheckedArray[T]](q)
         for k in 0 ..< n:
-          if not (xs[k] == ys[k]):
+          if not elementsEqual(xs[k], ys[k]):
             return false
     i += n
     j += n
-    if i == x.count:
+    if system.`==`(i, x.count):
       x = left.nextLeaf()
       i = 0
-    if j == y.count:
+    if system.`==`(j, y.count):
       y = right.nextLeaf()
       j = 0
   true
 
-proc hash*[T, H](v: FlexImpl[T, H]): Hash =
+proc hash*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): Hash =
   var h: Hash = 0
   for x in v:
     h = h !& hash(x)
   !$h
 
-proc `$`*[T, H](v: FlexImpl[T, H]): string =
+proc `$`*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): string =
   result = "["
   var first = true
   for x in v:
@@ -1246,7 +1313,7 @@ when defined(thetosDebug):
         doAssert size == 1 shl childShift(T, s), "regular node with a non-full child"
       result += size
 
-  proc checkInvariants*[T, H](v: FlexImpl[T, H]): FlexStats =
+  proc checkInvariants*[T; H: auto = FlexNoHead](v: FlexImpl[T, H]): FlexStats =
     ## Verifies the tree structure and returns its shape. Raises
     ## `AssertionDefect` on a violation. Only with `-d:thetosDebug`.
     if v.size == 0:
