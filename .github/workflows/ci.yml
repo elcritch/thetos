@@ -8,7 +8,16 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.mm }}${{ matrix.mode && ', release' || '' }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mm: [arc, orc, atomicArc]
+        mode: ['', '-d:release']
+    env:
+      # --skipParentCfg keeps config.nims from forcing --mm:atomicArc.
+      NIM_ARGS: --skipParentCfg --threads:on --mm:${{ matrix.mm }} ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,10 +41,15 @@ jobs:
         run: curl -fsSL https://raw.githubusercontent.com/nim-lang/atlas/HEAD/install.sh | bash -
 
       - name: Check Atlas version
-        run: atlas -v
+        run: |
+          atlas -v
+          atlas-run -v
 
       - name: Install dependencies
         run: atlas install
 
-      - name: Run tests (arc, orc, atomicArc; debug and release)
-        run: nim testAll
+      - name: Run tests
+        run: atlas-run tests --only-errors -- $NIM_ARGS
+
+      - name: Run container tests with -d:thetosSingleThread
+        run: atlas-run tests --only-errors ttriemap ttrieset ttrievec tbox -- $NIM_ARGS -d:thetosSingleThread
