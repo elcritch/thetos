@@ -96,8 +96,14 @@ loop is safe.
   written.
 * Element types must themselves be safe to copy from several threads.
   Plain values, `string`, `seq` and thetos containers are. Nim `ref`
-  values are only safe under `--mm:atomicArc`, because `arc`/`orc` count
-  `ref`s non-atomically.
+  values and closures are only safe under `--mm:atomicArc`, because
+  `arc`/`orc` count them non-atomically.
+* `Atom[T]` checks this at compile time. Under `--mm:arc` or `--mm:orc`
+  with threads on, an `Atom` whose `T` holds a `ref` or closure, at any
+  depth and including inside thetos containers, fails to compile. Build
+  with `--mm:atomicArc`, or define `thetosUnsafeRefAtom` to turn the check
+  off. Passing such values between threads some other way, such as
+  `createThread` arguments or channels, is not checked.
 * `Atom` is lock-free. It uses split reference counting: the atom word packs
   the cell pointer with a count of in-flight loads (16 bits on 64-bit
   targets, 32 on 32-bit). The old cell stays alive while the writer

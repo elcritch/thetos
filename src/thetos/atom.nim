@@ -7,7 +7,10 @@
 ##
 ## `T` must be safe to copy from several threads at once. All thetos
 ## containers qualify (copying one is an atomic increment), as do plain
-## values, strings and seqs.
+## values, strings and seqs. Nim refs and closures only qualify under
+## `--mm:atomicArc`. Under `--mm:arc` or `--mm:orc` with threads on, an
+## `Atom[T]` whose `T` holds them fails to compile; define
+## `thetosUnsafeRefAtom` to turn that check off.
 ##
 ## Implementation: each stored value lives in a refcounted cell. The atom
 ## word packs the cell pointer with a 16-bit (32-bit on 32-bit targets)
@@ -39,8 +42,8 @@ when defined(thetosSingleThread):
       "with -d:thetosSingleThread"
   .}
 
-import std/atomics
-import ./private/core
+import std/[atomics, typetraits]
+import ./private/[core, reftraits]
 
 type
   AtomCell[T] = object
@@ -72,6 +75,19 @@ template cellOf[T](w: uint64): CellPtr[T] =
 template packCell(p: pointer): uint64 =
   uint64(cast[uint](p))
 
+template checkShareable(T: typedesc) =
+  # arc/orc count refs and closures non-atomically, and every `load`
+  # copies the value from whichever thread calls it.
+  when compileOption("threads") and not defined(gcAtomicArc) and
+      not defined(thetosUnsafeRefAtom) and holdsNimRefs(T):
+    {.
+      error:
+        "Atom[" & name(T) & "] holds Nim refs or closures, whose reference " &
+        "counts are not atomic under --mm:arc or --mm:orc. Sharing them " &
+        "between threads corrupts memory. Build with --mm:atomicArc, or " &
+        "define thetosUnsafeRefAtom to disable this check."
+    .}
+
 proc releaseCell[T](c: CellPtr[T]) {.raises: [], gcsafe.} =
   if c != nil and dropRef(c):
     {.cast(raises: []), cast(gcsafe).}:
@@ -91,6 +107,7 @@ template makeCell(T: typedesc, payload: untyped): untyped =
     move(cell)
 
 proc newCell[T](value: sink T): CellPtr[T] =
+  checkShareable(T)
   makeCell(T, value)
 
 proc copyCell[T](value: T): CellPtr[T] =
@@ -119,6 +136,7 @@ proc `=dup`*[T](src: Atom[T]): Atom[T] {.error.}
 proc acquireCell[T](a: var Atom[T]): CellPtr[T] =
   ## Returns the current cell with one reference owned by the caller, or
   ## nil when the atom is empty.
+  checkShareable(T)
   var w = a.word.load(moRelaxed)
   while true:
     if cellOf[T](w) == nil:
