@@ -222,29 +222,56 @@ API: everything `TrieVec` has, plus `drop`, `[a .. b]`, `add` of another
 
 `Box[T]` holds one immutable value behind a reference count. Copying a box
 is O(1) however large the value is, which makes it a cheap way to share a
-big object, or to store one inside other containers.
+big object, or to store one inside other containers. Wrapping a plain
+object in a `Box` gives an immutable record that can be shared between
+threads, for example through an `Atom`.
 
 ```nim
 import thetos
 
-type Config = object
-  name: string
-  limits: seq[int]
+type Config* = object
+  name*: string
+  limits*: TrieVec[int]
+  retries*: int = 3
 
-let a = box(Config(name: "default", limits: @[1, 2, 3]))
+boxAccessors(Config)                      # getters: `b.name` for `b[].name`
+
+let a = box(Config(name: "default", limits: toTrieVec([1, 2])))
 let b = a                                 # O(1); both share one Config
-assert b[].name == "default"
+assert b.name == "default" and b.retries == 3
 
-# `update` builds a new box. It reuses the allocation if the box is unique.
-let c = a.update(proc(cfg: Config): Config =
+# `copyWith` returns a new box with some fields replaced; `a` is unchanged.
+let c = a.copyWith(name = "prod", retries = 5)
+assert a.name == "default" and c.name == "prod" and c.retries == 5
+
+# `update` applies a function to the whole value.
+let d = c.update do (cfg: Config) -> Config:
   result = cfg
-  result.limits.add 4)
-assert a[].limits.len == 3 and c[].limits.len == 4
+  result.limits.add 4
+assert c.limits.len == 2 and d.limits.len == 3
 
 assert default(Box[int]).isEmpty           # `[]` on an empty box raises
+assert default(Box[Config]).copyWith(name = "x").retries == 3   # starts from defaults
 ```
 
-API: `box`, `[]`, `update`, `isEmpty`, `==`, `hash`, `$`.
+`copyWith` takes the value out of the box, assigns the named fields, and boxes
+the result. When the box is not used afterwards and nothing else holds it,
+the value is moved rather than copied (`move(a).copyWith(...)` forces this).
+Field names and visibility are checked as ordinary field assignments, so
+private fields stay private.
+
+`boxAccessors(T)` generates a getter on `Box[T]` for each field of the
+object type `T`, exported when the field is. Fields private to another
+module are skipped. Getters return `lent` references, except case-object
+fields, which are copied.
+
+Every `copyWith` or `update` copies the whole value unless it can be moved, and
+`seq`, `string` and `Table` fields are deep copies in Nim. Use `TrieVec`,
+`TrieMap` and the other thetos containers for large fields: they copy in
+O(1).
+
+API: `box`, `[]`, `copyWith`, `update`, `unbox`, `isEmpty`, `boxAccessors`,
+`==`, `hash`, `$`.
 
 ## Atom
 
