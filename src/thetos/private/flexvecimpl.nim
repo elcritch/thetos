@@ -516,10 +516,25 @@ proc dropFront[T](v: var FlexVec[T], n: int) =
 # by level, redistributing slots only when a level would otherwise exceed
 # the optimal node count by more than `extraSteps`.
 
-proc executePlan[T](all: seq[FlexPtr[T]], level: int): seq[FlexPtr[T]] =
+const maxMerge = 2 * flexWidth
+  ## Nodes merged at one level: all but one slot each of `left` and `right`,
+  ## and the one or two of `center`.
+
+type MergeBuf[T] = object
+  ## Owned nodes made by `executePlan`, released unless handed on.
+  nodes: array[maxMerge, FlexPtr[T]]
+  len: int
+
+proc `=destroy`[T](b: MergeBuf[T]) =
+  for i in 0 ..< b.len:
+    release(b.nodes[i])
+
+proc `=copy`[T](dst: var MergeBuf[T], src: MergeBuf[T]) {.error.}
+
+proc executePlan[T](all: openArray[FlexPtr[T]], level: int, res: var MergeBuf[T]) =
   ## Redistributes the slots of the nodes in `all` (borrowed, at `level`)
-  ## into new owned nodes, reusing nodes that need no change.
-  var plan = newSeq[int](all.len)
+  ## into owned nodes in `res`, reusing nodes that need no change.
+  var plan {.noinit.}: array[maxMerge, int]
   var total = 0
   for i, n in all:
     plan[i] = n.count
@@ -547,22 +562,20 @@ proc executePlan[T](all: seq[FlexPtr[T]], level: int): seq[FlexPtr[T]] =
       plan[j] = plan[j + 1]
     dec n
     dec i
-  plan.setLen(n)
 
-  var nodes: seq[FlexPtr[T]]
-  defer:
-    for node in nodes:
-      release(node)
   var idx = 0
   var offset = 0
-  for target in plan:
+  for p in 0 ..< n:
+    let target = plan[p]
     if offset == 0 and all[idx].count == target:
       retain(all[idx])
-      nodes.add all[idx]
+      res.nodes[res.len] = all[idx]
+      inc res.len
       inc idx
       continue
     let node = (if level == 0: allocFlexLeaf[T]() else: allocFlexInner[T]())
-    nodes.add node
+    res.nodes[res.len] = node
+    inc res.len
     var filled = 0
     while filled < target:
       let src = all[idx]
@@ -584,7 +597,6 @@ proc executePlan[T](all: seq[FlexPtr[T]], level: int): seq[FlexPtr[T]] =
         offset = 0
     if level > 0:
       finishInner(node, level)
-  result = move(nodes)
 
 proc rebalance[T](left, center, right: FlexPtr[T], s: int): FlexPtr[T] =
   ## Merges the children of `left` (all but its last), of `center` (owned,
@@ -592,27 +604,34 @@ proc rebalance[T](left, center, right: FlexPtr[T], s: int): FlexPtr[T] =
   ## level `s + flexBits` holding one or two nodes at level `s`.
   defer:
     release(center)
-  var all: seq[FlexPtr[T]]
+  assert center.count <= 2
+  var all {.noinit.}: array[maxMerge, FlexPtr[T]]
+  var count = 0
   if left != nil:
     for k in 0 ..< left.count - 1:
-      all.add left.childArr[k]
+      all[count] = left.childArr[k]
+      inc count
   for k in 0 ..< center.count:
-    all.add center.childArr[k]
+    all[count] = center.childArr[k]
+    inc count
   if right != nil:
     for k in 1 ..< right.count:
-      all.add right.childArr[k]
-  let nodes = executePlan(all, s - flexBits)
+      all[count] = right.childArr[k]
+      inc count
+  var nodes: MergeBuf[T]
+  executePlan(toOpenArray(all, 0, count - 1), s - flexBits, nodes)
   result = allocFlexInner[T]()
   var k = 0
   while k < nodes.len:
     let n = allocFlexInner[T]()
     while k < nodes.len and n.count < flexWidth:
-      n.childArr[n.count] = nodes[k]
+      n.childArr[n.count] = nodes.nodes[k]
       inc n.count
       inc k
     finishInner(n, s)
     result.childArr[result.count] = n
     inc result.count
+  nodes.len = 0 # handed to the new nodes
   finishInner(result, s + flexBits)
 
 proc concatSub[T](left: FlexPtr[T], ls: int, right: FlexPtr[T], rs: int): FlexPtr[T] =
