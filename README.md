@@ -319,8 +319,7 @@ are mostly read, `ImmStr` or `string` is faster.
 
 The string benchmarks compare `string`, `ImmStr` and `FlexStr` across
 copying, hashing, reading, building, and editing.
-[arm64 (macOS)](docs/benchmark_std_string_arm64.md) ·
-[amd64 (FreeBSD)](docs/benchmark_std_string_amd64.md)
+[String benchmarks on arm64 and amd64](docs/benchmark_std_string.md)
 
 API: `toFlexStr`, `len`, `[]` (also `^i` and slices), `take`, `drop`, `&`,
 `add`, `insert`, `erase`, `replace`, `isEmpty`, `$`, `toImmStr`, `items`,
@@ -360,8 +359,7 @@ thread-local container types.
 | `Box` | `[]` when empty, `[value]` when populated |
 
 The JSON benchmarks cover text I/O, typed conversions, and edit history.
-[arm64 (macOS)](docs/benchmark_jsonutils_arm64.md) ·
-[amd64 (FreeBSD)](docs/benchmark_jsonutils_amd64.md)
+[JSON benchmarks on arm64 and amd64](docs/benchmark_jsonutils.md)
 
 ## Box
 

@@ -2,8 +2,8 @@
 
 Each column is the same benchmark source built against one commit of
 the `perf-improv` branch, so every column measures the same work.
-Times are ns per operation (µs where marked), the best of two runs of
-7 samples each, built with `-d:danger` and the default `--mm:atomicArc`.
+Times are in nanoseconds. Each value is the best of two runs of seven
+samples each, built with `-d:danger` and the default `--mm:atomicArc`.
 `change` compares the last column with the base. `FlexDeque` rows
 (`deque:`) exist only from column 5, so their `change` compares them
 with the `FlexVec` row for the same operation in the last column.
@@ -34,9 +34,10 @@ nim r -d:danger benchmarks/bstring.nim
 
 ## Summary
 
-`FlexVec` before this branch (base) and after it (column 6), in ns:
+The summary compares the base with column 6. The `FlexVec` iteration
+and equality rows give time per element.
 
-| operation | arch | base | final | change |
+| operation | arch | base (ns) | final (ns) | change (%) |
 |---|---|---:|---:|---:|
 | `==`, relaxed vs relaxed, 100k | arm64 | 9.3 | 0.5 | -95% |
 | `==`, relaxed vs relaxed, 100k | amd64 | 9.5 | 1.0 | -89% |
@@ -65,9 +66,9 @@ nim r -d:danger benchmarks/bstring.nim
 | FlexStr `==`, 16 B | arm64 | 7.2 | 6.9 | -4% |
 | FlexStr `==`, 16 B | amd64 | 46.6 | 47.5 | +2% |
 
-`FlexDeque` against `FlexVec`, both at column 6, in ns:
+The following results compare `FlexDeque` with `FlexVec` at column 6.
 
-| operation | arch | FlexVec | FlexDeque | change |
+| operation | arch | FlexVec (ns) | FlexDeque (ns) | change (%) |
 |---|---|---:|---:|---:|
 | `pushFront`, 100k | arm64 | 607.2 | 38.6 | -94% |
 | `pushFront`, 100k | amd64 | 1483.5 | 70.6 | -95% |
@@ -116,7 +117,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Iteration and comparison
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns/element) | 1 (ns/element) | 2 (ns/element) | 3a (ns/element) | 3b (ns/element) | 3c (ns/element) | 4 (ns/element) | 5 (ns/element) | 6 (ns/element) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | items, regular, 1000 | arm64 | 0.2 | 0.2 | 0.2 | 0.2 | 0.2 | 0.2 | 0.2 | 0.2 | 0.2 | +0% |
 | items, regular, 1000 | amd64 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 | +0% |
@@ -141,7 +142,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Indexing
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | v[i] random, regular, 1000 | arm64 | 4.3 | 3.4 | 3.5 | 3.4 | 3.5 | 2.9 | 2.9 | 3.5 | 3.5 | -19% |
 | v[i] random, regular, 1000 | amd64 | 4.1 | 4.1 | 4.3 | 4.7 | 4.1 | 4.7 | 4.1 | 4.4 | 4.4 | +7% |
@@ -162,7 +163,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Concatenation
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | a & b, 1000 + 1000 | arm64 | 2082.5 | 2087.8 | 2135.2 | 1759.2 | 1717.8 | 1647.6 | 1694.8 | 1639.7 | 1609.4 | -23% |
 | a & b, 1000 + 1000 | amd64 | 4608.3 | 5069.3 | 5002.8 | 3865.0 | 3776.1 | 3713.3 | 3772.4 | 3919.5 | 3782.4 | -18% |
@@ -183,7 +184,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Edits in the middle and at the front
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | insert middle, persistent, 1000 | arm64 | 775.9 | 771.3 | 706.8 | 539.7 | 490.8 | 473.4 | 491.6 | 483.9 | 471.4 | -39% |
 | insert middle, persistent, 1000 | amd64 | 1901.9 | 1909.7 | 1665.0 | 1390.2 | 1242.4 | 1267.3 | 1267.2 | 1259.2 | 1286.2 | -32% |
@@ -216,7 +217,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### FlexDeque: the same operations with a head leaf
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | deque: v[i] random, regular, 1000 | arm64 | – | – | – | – | – | – | – | 3.8 | 3.8 | +9% vs FlexVec |
 | deque: v[i] random, regular, 1000 | amd64 | – | – | – | – | – | – | – | 4.0 | 4.2 | -5% vs FlexVec |
@@ -259,7 +260,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Copying one value (into an array slot)
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr copy, 16 B | arm64 | 10.5 | 11.2 | 10.6 | 8.7 | 8.6 | 8.6 | 10.0 | 8.6 | 8.6 | -18% |
 | FlexStr copy, 16 B | amd64 | 14.5 | 14.6 | 14.7 | 14.6 | 14.6 | 14.6 | 16.6 | 14.7 | 14.5 | +0% |
@@ -270,7 +271,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Hashing (8 equal values in separate allocations, rotated)
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr hash, 16 B | arm64 | 23.5 | 21.9 | 23.7 | 21.6 | 22.5 | 21.6 | 25.1 | 22.3 | 21.2 | -10% |
 | FlexStr hash, 16 B | amd64 | 47.2 | 48.2 | 47.2 | 47.7 | 47.2 | 47.6 | 54.3 | 47.1 | 47.8 | +1% |
@@ -281,7 +282,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Equality of equal values in separate allocations
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr ==, 16 B | arm64 | 7.2 | 7.2 | 7.2 | 7.2 | 7.2 | 7.2 | 8.6 | 7.1 | 6.9 | -4% |
 | FlexStr ==, 16 B | amd64 | 46.6 | 46.5 | 46.5 | 46.2 | 46.0 | 46.3 | 49.6 | 46.7 | 47.5 | +2% |
@@ -292,28 +293,28 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Random byte access, 64 KiB
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr s[i] | arm64 | 4.5 | 4.5 | 4.5 | 4.5 | 4.0 | 4.0 | 4.0 | 3.7 | 3.7 | -18% |
 | FlexStr s[i] | amd64 | 5.5 | 5.2 | 5.3 | 5.3 | 5.3 | 5.3 | 5.7 | 5.1 | 5.1 | -7% |
 
 ### Iterating every byte, 64 KiB (per byte)
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns/byte) | 1 (ns/byte) | 2 (ns/byte) | 3a (ns/byte) | 3b (ns/byte) | 3c (ns/byte) | 4 (ns/byte) | 5 (ns/byte) | 6 (ns/byte) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr items | arm64 | 0.1 | 0.1 | 0.1 | 0.1 | 0.1 | 0.1 | 0.1 | 0.1 | 0.1 | +0% |
 | FlexStr items | amd64 | 0.6 | 0.6 | 0.6 | 0.6 | 0.6 | 0.6 | 0.6 | 0.6 | 0.6 | +0% |
 
 ### Appending 64 KiB one byte at a time (per byte)
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns/byte) | 1 (ns/byte) | 2 (ns/byte) | 3a (ns/byte) | 3b (ns/byte) | 3c (ns/byte) | 4 (ns/byte) | 5 (ns/byte) | 6 (ns/byte) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr add | arm64 | 6.2 | 6.2 | 6.2 | 6.2 | 4.7 | 4.6 | 6.2 | 4.7 | 4.7 | -24% |
 | FlexStr add | amd64 | 8.3 | 8.0 | 8.4 | 8.3 | 8.5 | 8.5 | 8.4 | 8.6 | 6.4 | -23% |
 
 ### Concatenating two equal-size values
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr &, 65536 B each | arm64 | 1555.1 | 1551.5 | 1534.5 | 824.1 | 877.9 | 726.7 | 740.6 | 677.6 | 732.9 | -53% |
 | FlexStr &, 65536 B each | amd64 | 3338.1 | 3344.4 | 3292.4 | 2529.0 | 2289.1 | 2273.3 | 2290.4 | 2291.2 | 2326.6 | -30% |
@@ -322,7 +323,7 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Inserting 8 bytes at a random offset (new version each time)
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr insert, 65536 B | arm64 | 1852.2 | 1849.9 | 1786.2 | 1242.9 | 1160.0 | 1145.0 | 1189.1 | 1109.6 | 1120.5 | -40% |
 | FlexStr insert, 65536 B | amd64 | 4016.8 | 4023.6 | 3929.8 | 3295.7 | 2946.1 | 2923.0 | 3063.2 | 2887.9 | 2945.2 | -27% |
@@ -331,23 +332,23 @@ column 3c, and `FlexDeque` about 0.3 ns slower than `FlexVec`.
 
 ### Slicing half of a 1 MiB value
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FlexStr s[a .. b] | arm64 | 719.2 | 720.0 | 725.4 | 647.5 | 620.2 | 611.0 | 589.2 | 578.3 | 612.3 | -15% |
 | FlexStr s[a .. b] | amd64 | 1637.7 | 1643.7 | 1635.0 | 1655.0 | 1463.7 | 1450.4 | 1559.0 | 1463.0 | 1480.8 | -10% |
 
 ### Editing a 64 KiB document 1000 times, keeping every version
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns/edit) | 1 (ns/edit) | 2 (ns/edit) | 3a (ns/edit) | 3b (ns/edit) | 3c (ns/edit) | 4 (ns/edit) | 5 (ns/edit) | 6 (ns/edit) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | seq[FlexStr] history (per edit) | arm64 | 247.3 | 230.6 | 227.9 | 227.7 | 216.8 | 215.8 | 224.8 | 217.2 | 216.5 | -12% |
 | seq[FlexStr] history (per edit) | amd64 | 616.2 | 614.1 | 622.3 | 620.0 | 561.1 | 560.2 | 570.3 | 570.9 | 563.1 | -9% |
 
 ### Converting from and to string, 64 KiB
 
-| operation | arch | base | 1 | 2 | 3a | 3b | 3c | 4 | 5 | 6 | change |
+| operation | arch | base (ns) | 1 (ns) | 2 (ns) | 3a (ns) | 3b (ns) | 3c (ns) | 4 (ns) | 5 (ns) | 6 (ns) | change (%) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | toFlexStr(string) | arm64 | 64980.1 | 64486.0 | 63961.9 | 64156.7 | 64007.3 | 62862.2 | 62593.3 | 63698.5 | 63443.3 | -2% |
-| toFlexStr(string) | amd64 | 163.9 µs | 161.2 µs | 161.5 µs | 158.3 µs | 142.3 µs | 141.3 µs | 161.6 µs | 140.4 µs | 140.1 µs | -15% |
+| toFlexStr(string) | amd64 | 163900 | 161200 | 161500 | 158300 | 142300 | 141300 | 161600 | 140400 | 140100 | -15% |
 | $FlexStr | arm64 | 3181.2 | 3339.1 | 3393.0 | 3286.6 | 3197.6 | 3377.3 | 3412.1 | 3333.5 | 3295.0 | +4% |
 | $FlexStr | amd64 | 6224.4 | 6100.2 | 6092.4 | 6108.0 | 6125.0 | 6122.5 | 6145.8 | 6122.4 | 6121.8 | -2% |

@@ -3,7 +3,7 @@
 ## Run with:
 ##   nim r -d:danger benchmarks/bstring.nim
 ##
-## Results in docs/benchmark_std_string_arm64.md and docs/benchmark_std_string_amd64.md.
+## Results and discussion in docs/benchmark_std_string.md.
 
 import std/[monotimes, times, strutils, hashes]
 import thetos
