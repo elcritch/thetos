@@ -1186,6 +1186,24 @@ proc toFlexDeque*[T](v: TrieVec[T]): FlexDeque[T] =
     for x in v:
       appendCopy(result, x)
 
+func sameSnapshot*[T](a: FlexImpl[T, auto], b: FlexImpl[T, auto]): bool {.inline.} =
+  ## Checks in O(1) whether both values share all their nodes in the same
+  ## positions. Two empty values also match. Accepts mixed `FlexVec` and
+  ## `FlexDeque` operands of the same element type.
+  if not (
+    system.`==`(a.size, b.size) and system.`==`(a.root, b.root) and
+    system.`==`(a.tail, b.tail)
+  ):
+    return false
+  when a is FlexDeque[T] and b is FlexDeque[T]:
+    result = system.`==`(a.head, b.head)
+  elif a is FlexDeque[T]:
+    result = a.head.isNil
+  elif b is FlexDeque[T]:
+    result = b.head.isNil
+  else:
+    result = true
+
 template elementsEqual(a, b: untyped): bool =
   mixin `==`
   a == b
@@ -1217,18 +1235,8 @@ proc `==`*[T; H, G: auto = FlexNoHead](a: FlexImpl[T, H], b: FlexImpl[T, G]): bo
     else:
       false
   when canSkipShared:
-    if system.`==`(a.root, b.root) and system.`==`(a.tail, b.tail):
-      when hasHead(H) and hasHead(G):
-        if system.`==`(a.head, b.head):
-          return true
-      elif hasHead(H):
-        if a.head.isNil:
-          return true
-      elif hasHead(G):
-        if b.head.isNil:
-          return true
-      else:
-        return true
+    if sameSnapshot(a, b):
+      return true
   # Walk both trees leaf by leaf; their leaf boundaries may differ.
   var left: LeafCursor[T, H]
   var right: LeafCursor[T, G]

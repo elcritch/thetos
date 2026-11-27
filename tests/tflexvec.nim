@@ -187,6 +187,19 @@ suite "FlexVec":
       model[^1] = '!'
       check c != toFlexVec(model)
 
+  test "snapshot identity requires sharing the entire vector":
+    let original = rangeVec(0, 100)
+    let alias = original
+    let rebuilt = rangeVec(0, 100)
+    let changedRoot = original.put(0, original.first)
+    let changedTail = original.put(original.high, original.last)
+    check sameSnapshot[int](original, alias)
+    check original == rebuilt and not sameSnapshot(original, rebuilt)
+    check original == changedRoot and not sameSnapshot(original, changedRoot)
+    check original == changedTail and not sameSnapshot(original, changedTail)
+    check sameSnapshot(initFlexVec[int](), original.take(0))
+    check not sameSnapshot(original, initFlexVec[int]())
+
   test "equality checks NaN even when leaves are shared":
     var values: array[33, float]
     values[0] = NaN
@@ -194,6 +207,7 @@ suite "FlexVec":
     let changedTail = v.put(32, 1.0).put(32, 0.0)
     let nested = toFlexVec([v])
     let withHead = toFlexVec([1.0, 2.0]).pushFront(NaN)
+    check sameSnapshot(v, v)
     check v != v
     check v != changedTail and changedTail != v
     check nested != nested
@@ -580,7 +594,16 @@ when not testDeque:
     test "equality checks NaN in nodes shared across container types":
       let v = toFlexVec([NaN])
       let d = toFlexDeque(v)
+      check sameSnapshot(v, d) and sameSnapshot(d, v)
       check v != d and d != v
+
+    test "snapshot identity checks deque heads":
+      let original = toFlexDeque([1, 2]).pushFront(0)
+      let changedHead = original.put(0, original.first)
+      let flat = toFlexVec(original)
+      check sameSnapshot(original, original)
+      check original == changedHead and not sameSnapshot(original, changedHead)
+      check original == flat and not sameSnapshot(original, flat)
 
     test "conversions share nodes and keep the elements":
       checkNoLeaks:

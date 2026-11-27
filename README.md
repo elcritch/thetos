@@ -235,7 +235,14 @@ take a few times longer. Use `TrieVec` when you never need the extra
 operations.
 
 API: everything `TrieVec` has, plus `drop`, `[a .. b]`, `add` of another
-`FlexVec`, `pushFront`, `insert`, `erase`, and `toFlexVec` from a `TrieVec`.
+`FlexVec`, `pushFront`, `insert`, `erase`, `sameSnapshot`, and `toFlexVec`
+from a `TrieVec`.
+
+`==` compares elements in order with their own `==`. With Nim's built-in
+float equality, a vector containing NaN compares unequal even to itself.
+`sameSnapshot(a, b)` checks in O(1) whether both values share the entire
+snapshot. Two empty values also match. Use `sameSnapshot(a, b) or a == b`
+to accept a reused snapshot immediately and compare elements for other pairs.
 
 ### FlexDeque
 
@@ -244,8 +251,8 @@ buffer outside the tree, like the tail. `pushFront` and repeated small
 `drop`s become amortized O(1) (about 40 ns and 65 ns, against 600 ns and
 250 ns on a 100,000-element `FlexVec`). In exchange a value is one word
 larger, and indexing, `[]=`, concatenation, `insert` and `erase` cost a few
-percent more. It has the same API, and `&`, `add` and `==` accept the two
-types mixed.
+percent more. It has the same API, and `&`, `add`, `==` and `sameSnapshot`
+accept the two types mixed.
 
 ```nim
 var queue = toFlexDeque([3, 4])
