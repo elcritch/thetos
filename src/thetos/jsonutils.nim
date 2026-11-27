@@ -427,8 +427,8 @@ proc fromJsonHook*(
 
 type
   JsonSequence[T] =
-    TrieVec[T] | FlexVec[T] | TrieSet[T] | local.TrieVec[T] | local.FlexVec[T] |
-    local.TrieSet[T]
+    TrieVec[T] | FlexVec[T] | FlexDeque[T] | TrieSet[T] | local.TrieVec[T] |
+    local.FlexVec[T] | local.FlexDeque[T] | local.TrieSet[T]
   JsonStringKey = string | ImmStr | FlexStr | local.ImmStr | local.FlexStr
 
 proc toJsonHook*[T](value: JsonSequence[T], opt = initToJsonOptions()): JsonNode =

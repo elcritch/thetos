@@ -1,12 +1,51 @@
 ## FlexVec tests. Built with `-d:thetosDebug` (for `checkInvariants`) and
 ## `-d:thetosTrackAllocs` (for leak checks); see tflexvec.nims.
+## tflexdeque.nim includes this file to run the same tests on `FlexDeque`.
 
 import std/[unittest, random, hashes, options]
-when defined(thetosTestLocal):
+when not declared(testDeque):
+  const testDeque = false
+when testDeque:
+  # `FlexVec` below names `FlexDeque`; see the aliases after the imports.
+  when defined(thetosTestLocal):
+    import thetos/local except FlexVec, toFlexVec, initFlexVec
+  else:
+    import thetos/trievec
+    import thetos/flexvec except FlexVec, toFlexVec, initFlexVec
+elif defined(thetosTestLocal):
   import thetos/local # the same tests, against the thread-local variants
 else:
   import thetos/[flexvec, trievec]
 import ./fixtures/falliblecopy
+
+when testDeque:
+  type FlexVec[T] = FlexDeque[T]
+
+  proc initFlexVec[T](): FlexVec[T] =
+    initFlexDeque[T]()
+
+  proc toFlexVec[T](xs: openArray[T]): FlexVec[T] =
+    toFlexDeque(xs)
+
+  proc toFlexVec[T](t: TrieVec[T]): FlexVec[T] =
+    toFlexDeque(t)
+
+type Digit = range[0'u8 .. 9'u8]
+
+proc `==`(a, b: Digit): bool =
+  ord(a) mod 2 == ord(b) mod 2
+
+type ComparedElement = object
+  value: int
+
+var comparedLeft, comparedRight: FlexVec[ComparedElement]
+var comparisonCount: int
+
+proc `==`(a, b: ComparedElement): bool =
+  inc comparisonCount
+  reset(comparedLeft)
+  reset(comparedRight)
+  a.value == b.value
 
 proc toSeq[T](v: FlexVec[T]): seq[T] =
   for x in v:
@@ -50,7 +89,7 @@ suite "FlexVec":
 
   test "basic API":
     var v = toFlexVec([1, 2, 3])
-    let w = v.pushBack(4)
+    let w = pushBack[int](v, 4)
     v[0] = 10
     check v == toFlexVec([10, 2, 3])
     check w == toFlexVec([1, 2, 3, 4])
@@ -71,6 +110,26 @@ suite "FlexVec":
     check pairs == @[(0, 1), (1, 2), (2, 3), (3, 4)]
     check hash(toFlexVec([1, 2])) == hash(toFlexVec([1, 2]))
     check toFlexVec(["a"]) & toFlexVec(["b"]) == toFlexVec(["a", "b"])
+
+  when not testDeque:
+    test "explicit type arguments work for vector operations":
+      proc doubled(x: int): int =
+        x * 2
+
+      var v = toFlexVec([1, 2, 3])
+      let w = `[]`[int, int, int](v, 1 .. 2)
+      let joined = `&`[int](v, w)
+      add[int](v, w)
+      check `==`[int](v, joined)
+      check update[int, typeof(doubled)](w, 0, doubled) == toFlexVec([4, 3])
+      check updateIt[int](w, 0, it * 2) == toFlexVec([4, 3])
+      when not defined(thetosTestLocal):
+        let append = flexvec.pushBack[int]
+        check append(w, 4) == toFlexVec([2, 3, 4])
+      var seen: seq[int]
+      for x in items[int](w):
+        seen.add x
+      check seen == @[2, 3]
 
   test "flex operations":
     let v = rangeVec(0, 100)
@@ -95,6 +154,81 @@ suite "FlexVec":
     check u.len == 400 and u[399] == 99
     discard u.checkInvariants()
 
+  test "equality across trees with different leaf boundaries":
+    var r = initRand(11)
+    proc pieces(n: int, r: var Rand): FlexVec[int] =
+      var i = 0
+      while i < n:
+        let k = min(1 + r.rand(40), n - i)
+        result = result & rangeVec(i, i + k)
+        i += k
+
+    for n in [1, 31, 32, 33, 500, 5000]:
+      let a = rangeVec(0, n)
+      let b = pieces(n, r)
+      check b.checkInvariants().relaxed > 0 or n <= 33
+      check a == b and b == a
+      check a.drop(1) == b.drop(1)
+      for i in [0, n div 2, n - 1]:
+        check a != b.put(i, -1) and b.put(i, -1) != a
+      let s = toFlexVec(["x", "y"]) & toFlexVec(["z"])
+      check s == toFlexVec(["x", "y", "z"])
+      check s != toFlexVec(["x", "y", "w"])
+      var c: FlexVec[char]
+      var model: seq[char]
+      while c.len < n:
+        var piece: FlexVec[char]
+        for k in 0 .. r.rand(150):
+          piece.add char(ord('a') + (c.len + k) mod 26)
+        c = c & piece
+      for x in c:
+        model.add x
+      check c == toFlexVec(model) and toFlexVec(model) == c
+      model[^1] = '!'
+      check c != toFlexVec(model)
+
+  test "snapshot identity requires sharing the entire vector":
+    let original = rangeVec(0, 100)
+    let alias = original
+    let rebuilt = rangeVec(0, 100)
+    let changedRoot = original.put(0, original.first)
+    let changedTail = original.put(original.high, original.last)
+    check sameSnapshot[int](original, alias)
+    check original == rebuilt and not sameSnapshot(original, rebuilt)
+    check original == changedRoot and not sameSnapshot(original, changedRoot)
+    check original == changedTail and not sameSnapshot(original, changedTail)
+    check sameSnapshot(initFlexVec[int](), original.take(0))
+    check not sameSnapshot(original, initFlexVec[int]())
+
+  test "equality checks NaN even when leaves are shared":
+    var values: array[33, float]
+    values[0] = NaN
+    let v = toFlexVec(values)
+    let changedTail = v.put(32, 1.0).put(32, 0.0)
+    let nested = toFlexVec([v])
+    let withHead = toFlexVec([1.0, 2.0]).pushFront(NaN)
+    check sameSnapshot(v, v)
+    check v != v
+    check v != changedTail and changedTail != v
+    check nested != nested
+    check withHead != withHead.put(2, 2.0)
+    check toFlexVec([0.0]) == toFlexVec([-0.0])
+
+  test "equality uses the element comparator for one-byte ranges":
+    check toFlexVec([Digit(1)]) == toFlexVec([Digit(3)])
+    check toFlexVec([Digit(1)]) != toFlexVec([Digit(2)])
+
+  test "equality keeps the compared versions alive during reassignment":
+    checkNoLeaks:
+      comparisonCount = 0
+      for i in 0 ..< 65:
+        comparedLeft.add ComparedElement(value: i)
+        comparedRight.add ComparedElement(value: i)
+      let equal = comparedLeft == comparedRight
+      check equal
+      check comparisonCount == 65
+      check comparedLeft.len == 0 and comparedRight.len == 0
+
   test "converts from TrieVec":
     let t = toTrieVec([1, 2, 3, 4])
     check toFlexVec(t) == toFlexVec([1, 2, 3, 4])
@@ -118,6 +252,52 @@ suite "FlexVec":
       if i mod 997 == 0:
         discard v.checkInvariants()
     check v.len == 0
+
+  test "front edits go through the head leaf":
+    checkNoLeaks:
+      var v: FlexVec[int]
+      var model: seq[int]
+      var snaps: seq[(FlexVec[int], seq[int])]
+      for i in 0 ..< 1000:
+        v = v.pushFront(i)
+        model.insert(i, 0)
+        if i mod 97 == 0:
+          snaps.add (v, model)
+      check v.agrees(model)
+      for (snap, m) in snaps:
+        check snap.agrees(m)
+
+      # Elements in the head can be replaced, taken and dropped.
+      var w = v
+      w[0] = -1
+      w[1] = -2
+      check w[0] == -1 and w[1] == -2 and v[0] == 999
+      check w.take(1).agrees(@[-1])
+      check w.take(3).agrees(@[-1, -2, model[2]])
+
+      # Repeated small drops keep the rest of a leaf as the head.
+      var d = v
+      var dm = model
+      for k in 0 ..< 300:
+        d = d.drop(1 + k mod 3)
+        dm = dm[1 + k mod 3 .. ^1]
+        if k mod 37 == 0:
+          check d.agrees(dm)
+      check d.agrees(dm)
+
+      # Concatenation with heads on both sides.
+      let both = d & v.drop(5)
+      check both.agrees(dm & model[5 .. ^1])
+      var tiny = toFlexVec([7, 8]).pushFront(6)
+      tiny.add(v.drop(1).take(3))
+      check tiny.agrees(@[6, 7, 8] & model[1 .. 3])
+
+      var seen = 0
+      for (p, n) in both.chunks:
+        for k in 0 ..< n:
+          check p[k] == (dm & model[5 .. ^1])[seen + k]
+        seen += n
+      check seen == both.len
 
   test "chunk iteration keeps its version alive during reassignment":
     var v = rangeVec(0, 2100)
@@ -267,8 +447,10 @@ suite "FlexVec":
               v = v.erase(i)
               model.delete(i)
           of 9:
-            v = v.pushFront(x)
-            model.insert(x, 0)
+            # Runs long enough to fill the head and push it into the tree.
+            for k in 0 ..< r.rand(1 .. 70):
+              v = v.pushFront(x + k)
+              model.insert(x + k, 0)
           of 10:
             if v.len > 0:
               let a = r.rand(v.high)
@@ -331,9 +513,13 @@ suite "FlexVec exception safety":
       expectCopyFailure(1):
         v.add(other)
       check v == source
+      # Prepending shares the existing leaves; only a shared head is copied.
+      let front = source.pushFront(fallibleValue(-1)).pushFront(fallibleValue(-2))
+      check front.len == 5 and source.len == 3
       expectCopyFailure(1):
-        discard source.pushFront(fallibleValue(-1))
-      check source.len == 3
+        discard front.pushFront(fallibleValue(-3))
+      check front.len == 5 and front[0] == fallibleValue(-2) and
+        front[1] == fallibleValue(-1)
 
   test "failed slicing, insertion and conversion release their allocations":
     checkNoLeaks:
@@ -402,3 +588,64 @@ suite "FlexVec get":
     let v = toFlexVec([missing, addr fallback])
     check v.get(0).isNone and v.get(1).get == addr fallback
     check v.getOrDefault(0, addr fallback) == nil
+
+when not testDeque:
+  suite "FlexVec and FlexDeque together":
+    test "equality checks NaN in nodes shared across container types":
+      let v = toFlexVec([NaN])
+      let d = toFlexDeque(v)
+      check sameSnapshot(v, d) and sameSnapshot(d, v)
+      check v != d and d != v
+
+    test "snapshot identity checks deque heads":
+      let original = toFlexDeque([1, 2]).pushFront(0)
+      let changedHead = original.put(0, original.first)
+      let flat = toFlexVec(original)
+      check sameSnapshot(original, original)
+      check original == changedHead and not sameSnapshot(original, changedHead)
+      check original == flat and not sameSnapshot(original, flat)
+
+    test "conversions share nodes and keep the elements":
+      checkNoLeaks:
+        let v = rangeVec(0, 2000)
+        let d = toFlexDeque(v)
+        check sizeof(FlexDeque[int]) == sizeof(FlexVec[int]) + sizeof(pointer)
+        check d.len == 2000 and d == v and v == d
+        var front = d
+        for i in 1 .. 100:
+          front = front.pushFront(-i)
+        let back = toFlexVec(front)
+        discard back.checkInvariants()
+        check back.len == 2100 and back[0] == -100 and back[100] == 0
+        check back == front and front.drop(100) == v
+        check toFlexVec(initFlexDeque[int]()).len == 0
+        check toFlexDeque(toTrieVec([1, 2])) == toFlexVec([1, 2])
+
+    test "concatenation mixes the two types":
+      checkNoLeaks:
+        var d = toFlexDeque([3, 4])
+        for i in countdown(2, 0):
+          d = d.pushFront(i)
+        let v = rangeVec(5, 600)
+        let dv = d & v
+        let vd = v & d
+        check dv is FlexDeque[int] and vd is FlexVec[int]
+        check dv == rangeVec(0, 600)
+        check vd == rangeVec(5, 600) & toFlexVec([0, 1, 2, 3, 4])
+        discard dv.checkInvariants()
+        discard vd.checkInvariants()
+        var empty: FlexVec[int]
+        empty.add(d)
+        check empty == d and empty is FlexVec[int]
+        var emptyDeque: FlexDeque[int]
+        emptyDeque.add(v)
+        check emptyDeque == v
+
+proc `==`(a, b: byte): bool =
+  ord(a) + 2 == ord(b)
+
+suite "FlexVec custom byte equality":
+  test "byte overrides apply to both independent and shared leaves":
+    let v = toFlexVec([1'u8])
+    check v == toFlexVec([3'u8])
+    check v != v

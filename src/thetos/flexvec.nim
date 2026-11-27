@@ -10,6 +10,14 @@
 ## `drop`, `take`, slicing, `insert`, `erase` and `pushFront` are
 ## O(log n) and share structure with their inputs.
 ##
+## `FlexDeque[T]` is the same tree with a head buffer for its first
+## elements, so `pushFront` and repeated small `drop`s are amortized O(1).
+## It has the same API, is one word larger, and indexing, `[]=` and
+## concatenation cost a little more. `toFlexDeque` converts a `FlexVec` in
+## O(1) and `toFlexVec` converts back in O(log n); `&`, `add` and `==` accept
+## the two types mixed. Both are aliases of `FlexImpl`, which the generated
+## docs list for every proc.
+##
 ## Reference counts are atomic, so vectors can be passed between threads
 ## without locks. Uniquely owned nodes are edited in place.
 
@@ -21,7 +29,12 @@ runnableExamples:
   assert b.insert(0, 0)[0] == 0
   assert b.erase(4) == toFlexVec([1, 2, 3, 4])
 
-import std/[hashes, options, typetraits]
+  var d = toFlexDeque(b)
+  for i in countdown(0, -2):
+    d = d.pushFront(i) # amortized O(1)
+  assert d.len == 8 and d[0] == -2 and d.drop(3) == b
+
+import std/[hashes, macros, options, typetraits]
 import ./private/core
 import ./trievec
 

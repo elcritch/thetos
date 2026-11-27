@@ -18,6 +18,7 @@ versions can be handed between threads with no locks, under `--mm:arc`,
 | `TrieSet[T]`    | `immer::set`               | CHAMP hash trie                             |
 | `TrieVec[T]`    | `immer::vector`            | 32-way radix-balanced tree with tail        |
 | `FlexVec[T]`    | `immer::flex_vector`       | relaxed radix-balanced (RRB) tree with tail |
+| `FlexDeque[T]`  | (no equivalent)            | `FlexVec` with a head buffer too            |
 | `Box[T]`        | `immer::box`               | refcounted immutable value                  |
 | `ImmStr`        | (no equivalent)            | immutable string, O(1) copies               |
 | `FlexStr`       | `immer::flex_vector<char>` | persistent string (rope) on an RRB tree     |
@@ -201,8 +202,8 @@ API: `initTrieVec`, `toTrieVec`, `len`, `high`, `low`, `[]` (also `^i`),
 `FlexVec[T]` is a relaxed radix-balanced (RRB) tree, after
 `immer::flex_vector`. It has the whole `TrieVec` API, and concatenation,
 slicing, `drop`, `insert`, `erase` and `pushFront` are O(log n) and share
-structure with their inputs. Leaves hold up to 128 trivially copyable one-byte
-elements or up to 32 elements of other types.
+structure with their inputs. Leaves hold up to 128 trivially copyable
+one-byte elements or up to 32 elements of other types.
 
 ```nim
 import thetos
@@ -234,7 +235,33 @@ take a few times longer. Use `TrieVec` when you never need the extra
 operations.
 
 API: everything `TrieVec` has, plus `drop`, `[a .. b]`, `add` of another
-`FlexVec`, `pushFront`, `insert`, `erase`, and `toFlexVec` from a `TrieVec`.
+`FlexVec`, `pushFront`, `insert`, `erase`, `sameSnapshot`, and `toFlexVec`
+from a `TrieVec`.
+
+`==` compares elements in order with their own `==`. With Nim's built-in
+float equality, a vector containing NaN compares unequal even to itself.
+`sameSnapshot(a, b)` checks in O(1) whether both values share the entire
+snapshot. Two empty values also match. Use `sameSnapshot(a, b) or a == b`
+to accept a reused snapshot immediately and compare elements for other pairs.
+
+### FlexDeque
+
+`FlexDeque[T]` is a `FlexVec` that also keeps its first elements in a head
+buffer outside the tree, like the tail. `pushFront` and repeated small
+`drop`s become amortized O(1) (about 40 ns and 65 ns, against 600 ns and
+250 ns on a 100,000-element `FlexVec`). In exchange a value is one word
+larger, and indexing, `[]=`, concatenation, `insert` and `erase` cost a few
+percent more. It has the same API, and `&`, `add`, `==` and `sameSnapshot`
+accept the two types mixed.
+
+```nim
+var queue = toFlexDeque([3, 4])
+queue = queue.pushFront(2).pushFront(1)   # amortized O(1)
+assert queue == toFlexVec([1, 2, 3, 4])
+queue = queue.drop(1)                     # cheap while it stays in the head
+let flat: FlexVec[int] = toFlexVec(queue) # O(log n); toFlexDeque is O(1)
+assert flat.len == 3
+```
 
 ## ImmStr
 
@@ -299,8 +326,7 @@ are mostly read, `ImmStr` or `string` is faster.
 
 The string benchmarks compare `string`, `ImmStr` and `FlexStr` across
 copying, hashing, reading, building, and editing.
-[arm64 (macOS)](docs/benchmark_std_string_arm64.md) ·
-[amd64 (FreeBSD)](docs/benchmark_std_string_amd64.md)
+[String benchmarks on arm64 and amd64](docs/benchmark_std_string.md)
 
 API: `toFlexStr`, `len`, `[]` (also `^i` and slices), `take`, `drop`, `&`,
 `add`, `insert`, `erase`, `replace`, `isEmpty`, `$`, `toImmStr`, `items`,
@@ -340,8 +366,7 @@ thread-local container types.
 | `Box` | `[]` when empty, `[value]` when populated |
 
 The JSON benchmarks cover text I/O, typed conversions, and edit history.
-[arm64 (macOS)](docs/benchmark_jsonutils_arm64.md) ·
-[amd64 (FreeBSD)](docs/benchmark_jsonutils_amd64.md)
+[JSON benchmarks on arm64 and amd64](docs/benchmark_jsonutils.md)
 
 ## Box
 
