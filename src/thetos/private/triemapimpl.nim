@@ -54,7 +54,7 @@ proc contains*[K, V](m: TrieMap[K, V], key: K): bool =
 proc hasKey*[K, V](m: TrieMap[K, V], key: K): bool =
   m.findEntry(key) != nil
 
-proc `[]`*[K, V](m: TrieMap[K, V], key: K): lent V =
+proc `[]`*[K, V](m: TrieMap[K, V], key: K): lent V {.inline.} =
   ## Returns the value for `key`. Raises `KeyError` if it is missing.
   let e = m.findEntry(key)
   if e == nil:

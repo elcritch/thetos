@@ -153,6 +153,23 @@ suite "TrieMap":
         checkModel(m, model)
     checkModel(m, model)
 
+  test "borrowed values are aligned in branch and collision nodes":
+    type AlignedValue = object
+      value {.align: 16.}: int
+
+    var m: TrieMap[BadKey, AlignedValue]
+    # Pairs (0, 3) and (1, 4) collide, leaving key 2 in the root node.
+    for i in 0 ..< 5:
+      m[BadKey(id: i)] = AlignedValue(value: i)
+    let snapshot = m
+    m[BadKey(id: 2)] = AlignedValue(value: 20)
+
+    for i in 0 ..< 5:
+      let key = BadKey(id: i)
+      check snapshot[key].value == i
+      check cast[uint](unsafeAddr snapshot[key]) mod uint(alignof(AlignedValue)) == 0
+    check m[BadKey(id: 2)].value == 20
+
   test "a raising hash leaves the map intact":
     for shared in [false, true]:
       flakyId = -1

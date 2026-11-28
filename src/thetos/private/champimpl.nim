@@ -37,14 +37,17 @@ type
 
   ChampPtr[E] = ptr ChampNode[E]
 
-template entryOffset(E: typedesc, nchildren: int): int =
-  alignUp(sizeof(ChampNode[E]) + nchildren * sizeof(pointer), alignof(E))
+template entryOffset(E: typedesc, nchildren: uint): uint =
+  # Each node has at most 32 child pointers, so this offset fits in a uint.
+  const alignmentMask = uint(alignof(E) - 1)
+  let offset = uint(sizeof(ChampNode[E])) + nchildren * uint(sizeof(pointer))
+  (offset + alignmentMask) and not alignmentMask
 
 template childArr[E](n: ChampPtr[E]): ptr UncheckedArray[ChampPtr[E]] =
   cast[ptr UncheckedArray[ChampPtr[E]]](cast[uint](n) + uint(sizeof(ChampNode[E])))
 
 template entryArr[E](n: ChampPtr[E]): ptr UncheckedArray[E] =
-  cast[ptr UncheckedArray[E]](cast[uint](n) + uint(entryOffset(E, int(n.nchildren))))
+  cast[ptr UncheckedArray[E]](cast[uint](n) + entryOffset(E, uint(n.nchildren)))
 
 template fragment(h: uint64, shift: int): uint32 =
   uint32((h shr shift) and champMask)
@@ -58,7 +61,7 @@ template index(map, bit: uint32): int =
 proc allocChamp[E](nentries, nchildren: int): ChampPtr[E] =
   static:
     doAssert alignof(E) <= 16, "entry alignment above 16 is unsupported"
-  let size = entryOffset(E, nchildren) + nentries * sizeof(E)
+  let size = int(entryOffset(E, uint(nchildren))) + nentries * sizeof(E)
   result = cast[ChampPtr[E]](allocRaw(size))
   initRc(result)
   result.nentries = uint32(nentries)
@@ -166,7 +169,7 @@ template findInChamp(root, needle, h: untyped, writable: static bool): untyped =
       return nil
   return nil
 
-proc champFind[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E =
+proc champFind[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E {.inline.} =
   findInChamp(root, key, h, false)
 
 proc champFindOwned[E, K](root: var ChampPtr[E], key: K, h: uint64): ptr E =
