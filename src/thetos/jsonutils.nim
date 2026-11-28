@@ -5,8 +5,8 @@
 ## Object member order is unspecified.
 ##
 ## `toJson`, `jsonTo` and `fromJson` use the conversion options and hook
-## signatures from `std/jsonutils`. The hooks in this module are also
-## available to callers using the stdlib's `JsonNode` API.
+## signatures familiar from `std/jsonutils`. Here `JsonNode` is a persistent
+## `JsonValue`, and nested fields and containers dispatch persistent hooks.
 
 runnableExamples:
   let before = parseJsonValue("""{"items":[1,2]}""")
@@ -14,15 +14,17 @@ runnableExamples:
   assert before["items"].jsonTo(seq[int]) == @[1, 2]
   assert after["items"].jsonTo(seq[int]) == @[1, 2, 3]
 
-import std/[formatfloat, hashes, json, options, parsejson, strbasics, streams, strutils]
-import std/jsonutils as stdJsonUtils
-import ./[box, flexstr, flexvec, immstr, triemap, trieset, trievec]
+import
+  std/[
+    enumutils, formatfloat, hashes, macros, math, options, parsejson, sets, strbasics,
+    streams, strtabs, strutils, tables, typetraits,
+  ]
+from std/json import JsonNodeKind, `$`, `[]=`, add, items, pairs
+import ./[box, flexstr, flexvec, immstr, triemap, triemultimap, trieset, trievec]
 from ./local import `[]`, `[]=`, `$`, add, incl, isEmpty, items, pairs
 from ./private/core import resetOnError
 
-export
-  JsonNodeKind, JsonParsingError, Joptions, ToJsonOptions, EnumMode, JsonNodeMode,
-  initToJsonOptions
+export JsonNodeKind, JsonParsingError
 
 type JsonValue* = object ## Persistent JSON tree. The default value is JSON null.
   case tag: JsonNodeKind
@@ -56,11 +58,6 @@ proc requireKind(actual, expected: JsonNodeKind) {.inline.} =
   if actual != expected:
     raise newException(ValueError, "Expected " & $expected & ", got " & $actual)
 
-proc requireKind(node: JsonNode, expected: JsonNodeKind) {.inline.} =
-  if node == nil:
-    raise newException(ValueError, "Expected " & $expected & ", got nil")
-  requireKind(node.kind, expected)
-
 proc getBool*(value: JsonValue): bool =
   ## Returns a boolean, or raises `ValueError` for a different kind.
   requireKind(value.tag, JBool)
@@ -79,11 +76,15 @@ proc getFloat*(value: JsonValue): float =
   requireKind(value.tag, JFloat)
   value.real
 
-proc getStr*(value: JsonValue): ImmStr =
+proc getImmStr*(value: JsonValue): ImmStr =
   ## Returns the text of a JSON string or a raw number.
   ## Raises `ValueError` for other kinds.
   requireKind(value.tag, JString)
   value.text
+
+proc getStr*(value: JsonValue): string =
+  ## Copies the text into a Nim string. Use `getImmStr` to share its storage.
+  $value.getImmStr
 
 proc initJsonArray*(values: openArray[JsonValue] = []): JsonValue =
   ## Creates a JSON array containing the given values in order.
@@ -222,7 +223,7 @@ proc hash*(value: JsonValue): Hash =
       hash(value.members)
   !$(hash(value.tag) !& payload)
 
-proc fromNode(node: JsonNode, depth: int): JsonValue =
+proc fromNode(node: json.JsonNode, depth: int): JsonValue =
   resetOnError(result):
     if node == nil:
       return default(JsonValue)
@@ -252,33 +253,33 @@ proc fromNode(node: JsonNode, depth: int): JsonValue =
       for key, item in node:
         result.members[toImmStr(key)] = fromNode(item, depth + 1)
 
-proc toJsonValue*(node: JsonNode): JsonValue =
+proc toJsonValue*(node: json.JsonNode): JsonValue =
   ## Copies a stdlib JSON tree into a persistent value. Nil becomes JSON null.
   ## Raises `ValueError` if the tree is nested beyond 1000 levels.
   fromNode(node, 0)
 
-proc toJsonNode*(value: JsonValue): JsonNode =
+proc toJsonNode*(value: JsonValue): json.JsonNode =
   ## Returns an independent, mutable stdlib JSON tree.
   case value.tag
   of JNull:
-    result = newJNull()
+    result = json.newJNull()
   of JBool:
-    result = newJBool(value.boolean)
+    result = json.newJBool(value.boolean)
   of JInt:
-    result = newJInt(value.integer)
+    result = json.newJInt(value.integer)
   of JFloat:
-    result = newJFloat(value.real)
+    result = json.newJFloat(value.real)
   of JString:
     if value.rawNumber:
       result = json.parseJson($value.text, rawIntegers = true, rawFloats = true)
     else:
-      result = newJString($value.text)
+      result = json.newJString($value.text)
   of JArray:
-    result = newJArray()
+    result = json.newJArray()
     for item in value.elements:
       result.add(toJsonNode(item))
   of JObject:
-    result = newJObject()
+    result = json.newJObject()
     for key, item in value.members:
       result[$key] = toJsonNode(item)
 
@@ -399,135 +400,4 @@ proc `$`*(value: JsonValue): string =
   ## Renders compact JSON. Object member order is unspecified.
   result.appendJson(value)
 
-proc toJsonHook*(value: JsonValue): JsonNode =
-  ## Encodes a persistent value for use with `std/jsonutils`.
-  toJsonNode(value)
-
-proc fromJsonHook*(value: var JsonValue, node: JsonNode) =
-  ## Decodes a stdlib JSON tree as a persistent value.
-  value = toJsonValue(node)
-
-proc toJsonHook*(value: ImmStr | FlexStr | local.ImmStr | local.FlexStr): JsonNode =
-  ## Encodes a thetos string as a JSON string.
-  newJString($value)
-
-proc fromJsonHook*(
-    value: var (ImmStr | FlexStr | local.ImmStr | local.FlexStr), node: JsonNode
-) =
-  ## Decodes a JSON string into a thetos string.
-  requireKind(node, JString)
-  when value is ImmStr:
-    value = toImmStr(node.str)
-  elif value is FlexStr:
-    value = toFlexStr(node.str)
-  elif value is local.ImmStr:
-    value = local.toImmStr(node.str)
-  else:
-    value = local.toFlexStr(node.str)
-
-type
-  JsonSequence[T] =
-    TrieVec[T] | FlexVec[T] | FlexDeque[T] | TrieSet[T] | local.TrieVec[T] |
-    local.FlexVec[T] | local.FlexDeque[T] | local.TrieSet[T]
-  JsonStringKey = string | ImmStr | FlexStr | local.ImmStr | local.FlexStr
-
-proc toJsonHook*[T](value: JsonSequence[T], opt = initToJsonOptions()): JsonNode =
-  ## Encodes a persistent vector or set as a JSON array. Set order is unspecified.
-  mixin toJsonHook
-  result = newJArray()
-  for item in items(value):
-    result.add(stdJsonUtils.toJson(item, opt))
-
-proc fromJsonHook*[T](value: var JsonSequence[T], node: JsonNode, opt = Joptions()) =
-  ## Replaces a persistent vector or set with the decoded array.
-  mixin fromJsonHook
-  requireKind(node, JArray)
-  var decoded: typeof(value)
-  for item in node:
-    let element = stdJsonUtils.jsonTo(item, T, opt)
-    when value is TrieSet[T] or value is local.TrieSet[T]:
-      decoded.incl(element)
-    else:
-      decoded.add(element)
-  value = decoded
-
-proc toJsonHook*[K, V](
-    value: TrieMap[K, V] | local.TrieMap[K, V], opt = initToJsonOptions()
-): JsonNode =
-  ## Encodes a string-keyed map as a JSON object. Other maps use an array
-  ## of two-element `[key, value]` arrays.
-  mixin toJsonHook
-  when K is JsonStringKey:
-    result = newJObject()
-    for key, item in pairs(value):
-      result[$key] = stdJsonUtils.toJson(item, opt)
-  else:
-    result = newJArray()
-    for key, item in pairs(value):
-      result.add(stdJsonUtils.toJson((key, item), opt))
-
-proc fromJsonHook*[K, V](
-    value: var (TrieMap[K, V] | local.TrieMap[K, V]), node: JsonNode, opt = Joptions()
-) =
-  ## Decodes a persistent map. The last occurrence of a key wins.
-  mixin fromJsonHook
-  var decoded: typeof(value)
-  when K is JsonStringKey:
-    requireKind(node, JObject)
-    for key, item in node:
-      let decodedKey = stdJsonUtils.jsonTo(newJString(key), K, opt)
-      decoded[decodedKey] = stdJsonUtils.jsonTo(item, V, opt)
-  else:
-    requireKind(node, JArray)
-    for entry in node:
-      let (key, item) = stdJsonUtils.jsonTo(entry, (K, V), opt)
-      decoded[key] = item
-  value = decoded
-
-proc toJsonHook*[T](value: Box[T] | local.Box[T], opt = initToJsonOptions()): JsonNode =
-  ## Encodes an empty box as `[]` or a boxed value as a one-element array.
-  mixin toJsonHook
-  result = newJArray()
-  if not value.isEmpty:
-    result.add(stdJsonUtils.toJson(value[], opt))
-
-proc fromJsonHook*[T](
-    value: var (Box[T] | local.Box[T]), node: JsonNode, opt = Joptions()
-) =
-  ## Decodes an empty or single-element array as a box.
-  mixin fromJsonHook
-  requireKind(node, JArray)
-  case node.len
-  of 0:
-    reset(value)
-  of 1:
-    let item = stdJsonUtils.jsonTo(node[0], T, opt)
-    when value is Box[T]:
-      value = box(item)
-    else:
-      value = local.box(item)
-  else:
-    raise
-      newException(ValueError, "Expected a JSON array of length zero or one for Box")
-
-proc toJson*[T](value: T, opt = initToJsonOptions()): JsonValue =
-  ## Encodes a Nim value as persistent JSON using the `std/jsonutils` hooks.
-  mixin toJsonHook
-  when T is JsonValue:
-    value
-  else:
-    toJsonValue(stdJsonUtils.toJson(value, opt))
-
-proc fromJson*[T](value: var T, node: JsonValue, opt = Joptions()) =
-  ## Decodes persistent JSON into an existing Nim value using the
-  ## `std/jsonutils` hooks and field matching options.
-  mixin fromJsonHook
-  when T is JsonValue:
-    value = node
-  else:
-    stdJsonUtils.fromJson(value, toJsonNode(node), opt)
-
-proc jsonTo*[T](node: JsonValue, target: typedesc[T], opt = Joptions()): T =
-  ## Decodes persistent JSON into a Nim value of type `target`.
-  mixin fromJsonHook
-  fromJson(result, node, opt)
+include ./private/jsonhooks

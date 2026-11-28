@@ -389,21 +389,48 @@ assert before["items"].jsonTo(seq[int]) == @[1, 2]
 assert after["items"].jsonTo(seq[int]) == @[1, 2, 3]
 ```
 
-`toJson`, `jsonTo`, and `fromJson` use the options and conversion hooks
-from `std/jsonutils`. Use `toJsonValue` and `toJsonNode` to convert between
-persistent values and independently mutable stdlib JSON trees.
+Typed conversions build and read the persistent tree directly. Define
+`toJsonHook` and `fromJsonHook` in scope for your type. The conversion
+engine prefers a hook that accepts options and also accepts a hook that
+omits them. Options propagate to nested fields and collection elements.
 
-Importing `thetos/jsonutils` also makes its hooks available to the stdlib
-conversion procs. If both modules are imported, qualify the conversion
-procs with their module aliases. The hooks support the atomic and
-thread-local container types.
+```nim
+import thetos/jsonutils
+
+type UserId = distinct string
+
+proc toJsonHook(id: UserId, opt: ToJsonOptions): JsonNode =
+  newJString(string(id))
+
+proc fromJsonHook(id: var UserId, node: JsonNode, opt: Joptions) =
+  id = UserId(node.getStr)
+
+let ids = parseJson("""["user-7"]""").jsonTo(seq[UserId])
+assert toJson(ids) == %*["user-7"]
+```
+
+Here `JsonNode` aliases `JsonValue`. The hook signatures, option names,
+scalar constructors, `add`, and object assignment support common hook bodies
+written for `std/[json, jsonutils]`. Switching imports recompiles those hooks
+for the chosen node type. `getStr` returns a Nim string and `getImmStr` shares
+the stored bytes. Use `put` to replace nested members while retaining snapshots.
+Use `toJsonValue` and `toJsonNode` at boundaries with mutable stdlib trees.
+
+Objects and named tuples encode as objects. Positional tuples, arrays, sequences
+and sets encode as arrays. `Option.none` and nil references encode as null.
+`Joptions` controls missing and extra object fields, and `ToJsonOptions.enumMode`
+selects enum ordinals, symbols, or display strings. Node reference and copy modes
+both share the persistent snapshot. Serializing node internals with
+`joptJsonNodeAsObject` raises `ValueError`. Raw pointers and objects with nested
+case discriminators require a custom decoder.
 
 | Type | JSON form |
 |---|---|
 | `ImmStr`, `FlexStr` | String |
-| `TrieVec`, `FlexVec`, `TrieSet` | Array. Set order is unspecified. |
+| `TrieVec`, `FlexVec`, `FlexDeque`, `TrieSet` | Array. Set order is unspecified. |
 | `TrieMap` with `string`, `ImmStr`, or `FlexStr` keys | Object |
 | `TrieMap` with other key types | Array of `[key, value]` pairs |
+| `TrieMultiMap` | Array of `[key, value]` pairs preserving duplicates. |
 | `Box` | `[]` when empty, `[value]` when populated |
 
 The JSON benchmarks cover text I/O, typed conversions, and edit history.

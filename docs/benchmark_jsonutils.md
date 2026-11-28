@@ -44,9 +44,23 @@ with a parsed tree and produces compact JSON.
 into persistent containers. The renderer writes to one string buffer and
 appends runs of unescaped bytes together.
 
-### Typed conversions
+### Native typed conversions
 
-Both sides convert the same Nim object containing a `FlexVec` of 256
+The native hook implementation and its baseline (`5d6efc5`) used the same
+benchmark source with a `seq[Row]` on both sides. On the M3 Pro, each timing
+below is the median of three alternating invocations of 2,000 operations,
+built with Nim 2.2.12 and `-d:release` using atomicArc and threads. Each
+operation converts the entire 256-record document. Parsing and rendering
+are outside the timed loop.
+
+| Operation | Via stdlib tree (µs) | Native hooks (µs) | Speedup |
+|---|---:|---:|---:|
+| Encode | 214.98 | 95.86 | 2.24× |
+| Decode | 205.37 | 53.28 | 3.85× |
+
+### Earlier typed conversions through the stdlib
+
+The earlier benchmark converted the same Nim object containing a `FlexVec` of 256
 records. The stdlib calls use the thetos hooks for that vector. Parsing
 and rendering are outside the timed loops.
 
@@ -57,8 +71,7 @@ and rendering are outside the timed loops.
 | Decode into the Nim object | arm64 | 74.0 | 206.7 |
 | Decode into the Nim object | amd64 | 65.14 | 181.70 |
 
-`thetos/jsonutils` delegates typed conversions to the stdlib engine for
-its options and hooks. Each call also converts the tree between
+This version delegated typed conversions to the stdlib engine. Each call also converted the tree between
 `JsonNode` and `JsonValue`.
 
 ### Keeping every version

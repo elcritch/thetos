@@ -1,5 +1,5 @@
-import std/[hashes, json, options, strutils, tables, unittest]
-import std/jsonutils as stdJsonUtils
+import std/[hashes, options, strutils, sets, strtabs, tables, unittest]
+from std/json import `[]`, `[]=`, getStr
 import thetos
 import thetos/jsonutils as persistent
 from thetos/local import add
@@ -95,9 +95,9 @@ suite "Persistent JsonValue":
   test "mutable stdlib JSON trees are independent of persistent values":
     var source = json.parseJson("""{"word":"before","items":[1]}""")
     let stable = toJsonValue(source)
-    source["word"] = newJString("after")
+    source["word"] = json.newJString("after")
     var restored = stable.toJsonNode()
-    restored["items"].add(newJInt(2))
+    json.add(restored["items"], json.newJInt(2))
     check stable["word"].getStr == "before" and stable["items"].len == 1
     check toJsonValue(nil).kind == JNull
 
@@ -126,11 +126,11 @@ suite "Persistent JsonValue":
     check liveAllocations() == baseline
 
   test "a too-deep stdlib tree releases partially converted nodes":
-    var source = newJArray()
+    var source = json.newJArray()
     for i in 0 ..< 1001:
-      var parent = newJArray()
-      parent.add(newJString("sibling"))
-      parent.add(source)
+      var parent = json.newJArray()
+      json.add(parent, json.newJString("sibling"))
+      json.add(parent, source)
       source = parent
     let baseline = liveAllocations()
     expect ValueError:
@@ -157,7 +157,7 @@ suite "Persistent JsonValue":
       check prior["version"].getInt == 1 and state.load()["version"].getInt == 2
 
 suite "JSON conversion hooks":
-  test "stdlib options and custom hooks work inside nested containers":
+  test "persistent options and custom hooks work inside nested containers":
     let entries = toFlexVec([Entry(label: Label("first"), status: ready, count: 2)])
     let source = (entries: entries, meta: {"optional": some(3)}.toTable)
     let node = persistent.toJson(source, ToJsonOptions(enumMode: joptEnumString))
@@ -174,7 +174,7 @@ suite "JSON conversion hooks":
     )
     check entry.count == 9 and string(entry.label) == "first"
 
-  test "stdlib entry points recognize hooks for thetos types":
+  test "persistent entry points recognize hooks for thetos types":
     let original = (
       strings: toTrieVec([toImmStr("text")]),
       rope: toFlexStr("rope"),
@@ -183,10 +183,10 @@ suite "JSON conversion hooks":
       flags: toTrieSet([2, 7]),
       payload: parseJsonValue("""{"data":true}"""),
     )
-    let node = stdJsonUtils.toJson(original)
+    let node = persistent.toJson(original)
     check $node["strings"] == """["text"]""" and $node["rope"] == """"rope""""
     check $node["deque"] == "[-1,0,1]"
-    check stdJsonUtils.jsonTo(node, typeof(original)) == original
+    check persistent.jsonTo(node, typeof(original)) == original
 
   test "persistent maps use objects for strings and pairs for other keys":
     let text = toTrieMap([(toImmStr("a"), 1), (toImmStr("b"), 2)])
@@ -239,3 +239,107 @@ suite "JSON conversion hooks":
     expect ValueError:
       persistent.fromJson(values, initJsonObject())
     check values.len == 1 and string(values[0]) == "kept"
+
+type
+  WireCode = distinct int
+  Choice = object
+    label: string
+    case present: bool
+    of true: code: WireCode
+    else:
+      discard
+
+proc toJsonHook(code: WireCode): JsonNode =
+  newJInt(10 + int(code))
+
+proc fromJsonHook(code: var WireCode, node: JsonNode) =
+  code = WireCode(node.getInt - 10)
+
+suite "Native JSON hooks":
+  test "simple hooks and variant objects":
+    var choice = Choice(label: "keep")
+    fromJson(
+      choice,
+      parseJsonValue("""{"present":true,"code":15}"""),
+      Joptions(allowMissingKeys: true),
+    )
+    check choice.present and choice.label == "keep" and int(choice.code) == 5
+    check toJson(choice)["code"].getInt == 15
+    check parseJsonValue("""{"label":"reset","present":false}""").jsonTo(Choice).present ==
+      false
+
+  test "scalars, fixed arrays, positional tuples and sets":
+    let values = ([1'u16, 2], {'a', 'b'}, (true, 'x'), -Inf)
+    check toJson(values).jsonTo(typeof(values)) == values
+    expect ValueError:
+      discard newJInt(-1).jsonTo(uint8)
+    expect ValueError:
+      discard newJInt(256).jsonTo(uint8)
+    expect ValueError:
+      discard newJArray().jsonTo(array[2, int])
+
+suite "Persistent JSON builders":
+  test "JSON literals, mutable builder syntax and immutable snapshots":
+    var node = %*{"items": [nil, 1, {"active": true}], "empty": {}}
+    let before = node
+    node["items"] = %*[3]
+    check before["items"][2]["active"].getBool
+    check node == parseJson("""{"items":[3],"empty":{}}""")
+    check node.toJsonNode.toJsonValue == node
+
+  test "multimaps preserve duplicate values":
+    let m = toTrieMultiMap([("x", 1), ("x", 2), ("x", 1)])
+    check toJson(m).jsonTo(typeof(m)) == m
+
+type Failable = distinct int
+proc toJsonHook(value: Failable): JsonNode =
+  if int(value) < 0:
+    raise newException(ValueError, "negative value")
+  newJString($int(value))
+
+suite "Hook errors":
+  test "partially encoded containers release their nodes":
+    let values = toFlexVec([Failable(1), Failable(-1)])
+    let baseline = liveAllocations()
+    expect ValueError:
+      discard toJson(values)
+    check liveAllocations() == baseline
+    expect ValueError:
+      discard toJson(@[Failable(1), Failable(-1)])
+    check liveAllocations() == baseline
+
+type
+  WireEnum = enum
+    firstWire = (2, "first-wire")
+    lastWire = (7, "last-wire")
+
+  Meter = distinct int
+  RecordRef = ref object
+    id: int
+
+suite "Native standard types":
+  test "sparse enum symbols, ordinals and strings work in containers":
+    for mode in [joptEnumOrd, joptEnumSymbol, joptEnumString]:
+      let data = @[lastWire].toHashSet
+      let json = toJson(data, ToJsonOptions(enumMode: mode))
+      check json.jsonTo(typeof(data)) == data
+    expect ValueError:
+      discard newJInt(3).jsonTo(WireEnum)
+
+  test "references, distinct scalars, and string tables":
+    check int(toJson(Meter(12)).jsonTo(Meter)) == 12
+    check toJson(RecordRef(id: 5)).jsonTo(RecordRef).id == 5
+    check newJNull().jsonTo(RecordRef).isNil
+    let t = newStringTable("A", "first", modeCaseInsensitive)
+    check toJson(t).jsonTo(StringTableRef)["a"] == "first"
+
+  test "object key options propagate through sequences":
+    type Row = object
+      nr: int
+
+    let node = parseJson("""[{"nr":1,"extra":true}]""")
+    expect ValueError:
+      discard node.jsonTo(seq[Row])
+    check node.jsonTo(seq[Row], Joptions(allowExtraKeys: true))[0].nr == 1
+    expect ValueError:
+      discard newJObject().jsonTo(Row)

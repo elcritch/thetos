@@ -5,7 +5,6 @@
 
 import std/[json, monotimes, os, strutils, times]
 import std/jsonutils as stdJsonUtils
-import thetos/flexvec
 import thetos/jsonutils as persistent
 
 type
@@ -17,7 +16,7 @@ type
     tags: seq[string]
 
   Document = object
-    rows: FlexVec[Row]
+    rows: seq[Row]
 
 proc makeDocument(): Document =
   for i in 0 ..< 256:
@@ -100,7 +99,7 @@ template benchHistory(name: string, initial, edit: untyped) =
 
 benchHistory("std-history", stdValue):
   let changed = previous.copy()
-  changed["rows"][rowIndex]["id"] = newJInt(id)
+  changed["rows"][rowIndex]["id"] = json.newJInt(id)
   changed
 
 benchHistory("history", value):
