@@ -22,7 +22,9 @@ import
 from std/json import JsonNodeKind, `$`, `[]=`, add, items, pairs
 import ./[box, flexstr, flexvec, immstr, triemap, triemultimap, trieset, trievec]
 from ./local import `[]`, `[]=`, `$`, add, incl, isEmpty, items, pairs
-from ./private/core import resetOnError
+from ./private/core import raiseKeyError, resetOnError
+from ./triemap {.all.} as maps import findWritableValue
+from ./flexvec {.all.} as vectors import writableValue
 
 export JsonNodeKind, JsonParsingError
 
@@ -138,6 +140,66 @@ proc get*(value: JsonValue, index: int): Option[JsonValue] =
     value.elements.get(index)
   else:
     none(JsonValue)
+
+# Instantiate the heterogeneous CHAMP lookup here, where ImmStr's hash and
+# equality with a string are in scope regardless of the caller's imports.
+proc writableMember(node: var JsonValue, key: string): ptr JsonValue {.inline.} =
+  requireKind(node.kind, JObject)
+  maps.findWritableValue(node.members, key)
+
+proc writableMember(node: var JsonValue, key: ImmStr): ptr JsonValue {.inline.} =
+  requireKind(node.kind, JObject)
+  maps.findWritableValue(node.members, key)
+
+proc `[]=`*(node: var JsonValue, key: string, item: sink JsonValue) =
+  let member = writableMember(node, key)
+  if member != nil:
+    member[] = item
+  else:
+    node.members[toImmStr(key)] = item
+
+proc `[]=`*(node: var JsonValue, key: ImmStr, item: sink JsonValue) =
+  requireKind(node.kind, JObject)
+  node.members[key] = item
+
+proc `[]=`*(node: var JsonValue, i: Natural, item: sink JsonValue) =
+  requireKind(node.kind, JArray)
+  node.elements[i] = item
+
+proc assignPath[P: tuple](
+    node: var JsonValue, path: P, depth: static[int], item: var JsonValue
+) {.inline.} =
+  template key(): untyped =
+    path[depth]
+
+  when depth + 1 == path.tupleLen:
+    node[key] = move(item)
+  elif key is string | ImmStr:
+    let member = writableMember(node, key)
+    if member == nil:
+      raiseKeyError(key)
+    assignPath(member[], path, depth + 1, item)
+  else:
+    requireKind(node.kind, JArray)
+    assignPath(vectors.writableValue(node.elements, key), path, depth + 1, item)
+
+proc setPath*(node: var JsonValue, path: tuple, item: sink JsonValue) {.inline.} =
+  ## Assigns a nested JSON value, reusing uniquely owned nodes along the path.
+  ## `string` or `ImmStr` keys select object members and nonnegative indices select
+  ## array elements. The final object key may be new. A missing intermediate
+  ## key raises `KeyError`, an index past the end raises `IndexDefect`, and
+  ## a mismatched container kind raises `ValueError`.
+  runnableExamples:
+    var doc = parseJsonValue("""{"rows":[{"id":1}]}""")
+    let snapshot = doc
+    doc.setPath(("rows", 0, "id"), toJson(2))
+    assert doc["rows"][0]["id"].getInt == 2
+    assert snapshot["rows"][0]["id"].getInt == 1
+
+  static:
+    doAssert path.tupleLen > 0, "Expected a nonempty JSON path"
+  var replacement = item
+  assignPath(node, path, 0, replacement)
 
 proc put*(
     value: sink JsonValue, key: string | ImmStr, item: sink JsonValue

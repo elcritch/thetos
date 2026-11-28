@@ -1,8 +1,8 @@
 # JSON benchmarks on arm64 and amd64
 
 This compares the stdlib's mutable JSON tree with thetos' persistent JSON
-tree across text I/O, typed conversions, and edits that retain previous
-versions.
+tree across text I/O, typed conversions, ordinary edits, and edits that
+retain previous versions.
 
 * **`JsonNode`** from `std/json` is a mutable tree with ordered object
   members and arrays backed by sequences. Assigning a node shares its
@@ -12,41 +12,44 @@ versions.
   storage, and edits copy the paths they change. Object member order is
   unspecified.
 
-## ORC on arm64
+## ORC and ARC on arm64
 
-On the Apple M3 Pro, thetos rendered the document 1.50× faster and decoded
-it 1.38× faster than the stdlib. The stdlib encoded it 1.44× faster.
+On an Apple M3 Pro, both libraries took about 0.05 µs to update a field
+when keeping only the current document. Retaining all 501 versions took
+0.99 MiB for thetos and 130.12 MiB for the stdlib under either memory manager.
 
-| Operation | Stdlib JSON | thetos JSON (`97efd2c`) |
-| --- | ---: | ---: |
-| Parse JSON text into a tree | 239.88 µs | 237.67 µs |
-| Render a tree to JSON text | 126.94 µs | 84.60 µs |
-| Encode a Nim `Document` into a tree | 65.40 µs | 94.05 µs |
-| Decode a tree into a Nim `Document` | 74.66 µs | 54.07 µs |
-| Edit the current document | 0.05 µs/edit | 0.54 µs/edit |
-| Edit and retain a snapshot | 118.88 µs/edit | 0.58 µs/edit |
-| Memory retained across 500 edits | 130.12 MiB | 1.02 MiB |
+| Operation | ORC stdlib JSON | ORC thetos JSON | ARC stdlib JSON | ARC thetos JSON |
+| --- | ---: | ---: | ---: | ---: |
+| Parse JSON text into a tree | 239.80 µs | 237.40 µs | 243.69 µs | 238.58 µs |
+| Render a tree to JSON text | 126.12 µs | 84.82 µs | 128.03 µs | 86.92 µs |
+| Encode a Nim `Document` into a tree | 68.25 µs | 91.11 µs | 70.48 µs | 90.95 µs |
+| Decode a tree into a Nim `Document` | 77.96 µs | 52.48 µs | 71.63 µs | 52.53 µs |
+| Edit the current document | 0.049 µs/edit | 0.049 µs/edit | 0.050 µs/edit | 0.048 µs/edit |
+| Edit and retain a snapshot | 119.15 µs/edit | 0.465 µs/edit | 137.00 µs/edit | 0.475 µs/edit |
+| Memory retained across 500 edits | 130.12 MiB | 0.99 MiB | 130.12 MiB | 0.99 MiB |
 
-Both APIs ran in the same executable with Nim 2.2.12, ORC, and threads
-enabled. Each timing is the fastest of seven rounds of 500 operations on
-the same 31,129-byte document containing 256 rows. Each round calls
+For each memory manager, both libraries ran in the same release executable
+with Nim 2.2.12 and threads enabled. The table reports the median of three
+invocations. Each invocation took the fastest of seven rounds of 500
+operations on a 31,129-byte document containing 256 rows. Each round calls
 `GC_fullCollect()` before starting the timer and again after its locals
 leave scope, before stopping the timer.
 
-Both edit workloads replace one row's `id` per operation and visit rows
-in the same order. The current-document workload starts with an independently
-parsed tree outside the timer. The stdlib updates the row in place and
-thetos replaces the edited path. Only the latest document is kept.
-For each retained snapshot the
-stdlib deep-copied the mutable tree before editing one row, while thetos
-copied the changed path and shared the other rows. The history benchmark
-also runs a timed collection with all 501 versions live immediately before
-measuring retained memory.
+Both edit workloads replace one row's `id` per operation and visit rows in
+the same order. The current-document workload starts with an independently
+parsed tree outside the timer. The stdlib assigns to
+`document["rows"][i]["id"]`. Thetos calls
+`document.setPath(("rows", i, "id"), value)`, which reuses uniquely owned
+nodes and copies shared nodes along the path. For the snapshot workload,
+the stdlib deep-copies the document before each edit and thetos keeps a
+copy of the root value. The benchmark calls `GC_fullCollect()` with all
+501 versions live immediately before measuring retained memory.
 
-Run the ORC benchmark from the repository root.
+Run the comparisons from the repository root.
 
 ```sh
 nim r -d:release --mm:orc --threads:on benchmarks/bjsonutils.nim all 500
+nim r -d:release --mm:arc --threads:on benchmarks/bjsonutils.nim all 500
 ```
 
 ## atomicArc setup

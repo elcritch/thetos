@@ -61,6 +61,12 @@ proc `[]`*[K, V](m: TrieMap[K, V], key: K): lent V =
     raiseKeyError(key)
   e.value
 
+proc findWritableValue[K, V, Q](m: var TrieMap[K, V], key: Q): ptr V =
+  # The caller must finish writing before it copies or modifies the map again.
+  let entry = champFindOwned(m.root, key, keyHash(key))
+  if entry != nil:
+    result = addr entry.value
+
 proc getOrDefault*[K, V](m: TrieMap[K, V], key: K, def: V = default(V)): V =
   let e = m.findEntry(key)
   if e == nil: def else: e.value

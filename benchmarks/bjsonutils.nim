@@ -66,7 +66,7 @@ template bench(name: string, body: untyped) =
       GC_fullCollect()
       best = min(best, (getMonoTime() - start).inNanoseconds)
     echo name,
-      " ", formatFloat(best.float / iterations.float / 1_000, ffDecimal, 2), " µs/op"
+      " ", formatFloat(best.float / iterations.float / 1_000, ffDecimal, 3), " µs/op"
 
 template repeatBench(name: string, measure: untyped) =
   bench(name):
@@ -86,9 +86,7 @@ proc editRow(document: json.JsonNode, rowIndex, id: int) =
   document["rows"][rowIndex]["id"] = json.newJInt(id)
 
 proc editRow(document: var JsonValue, rowIndex, id: int) =
-  let rows = document["rows"]
-  let row = rows[rowIndex].put("id", persistent.toJson(id))
-  document["rows"] = rows.put(rowIndex, row)
+  document.setPath(("rows", rowIndex, "id"), persistent.toJson(id))
 
 template benchEdit(name: string, freshDocument: untyped) =
   if selected(name):

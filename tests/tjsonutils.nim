@@ -3,7 +3,7 @@ from std/json import `[]`, `[]=`, getStr
 import thetos
 import thetos/jsonutils as persistent
 from thetos/local import add
-from thetos/private/core import liveAllocations
+from thetos/private/core import allocCount, liveAllocations
 
 type
   Label = distinct string
@@ -69,6 +69,60 @@ suite "Persistent JsonValue":
     check sum == 7
     for key, value in after:
       check key == "items" and value == edited
+
+  test "nested assignments reuse owned nodes and preserve shared rows":
+    let baseline = liveAllocations()
+    block:
+      var doc = initJsonObject()
+      var rows = initJsonArray()
+      for i in 0 ..< 70:
+        rows.add(initJsonObject([("id", newJInt(i))]))
+      doc["rows"] = move(rows)
+      let before = allocCount()
+      for i in [0, 32, 69]:
+        doc.setPath(("rows", i, "id"), newJInt(-i))
+      check allocCount() == before
+      let snapshot = doc
+      let savedRows = doc["rows"]
+      for i in [0, 32, 69]:
+        doc.setPath((toImmStr("rows"), i, "id"), newJInt(i + 100))
+        check doc["rows"][i]["id"].getInt == i + 100
+        check snapshot["rows"][i]["id"].getInt == -i
+        check savedRows[i]["id"].getInt == -i
+      doc.setPath(("rows", 1, "copy"), doc["rows"][0])
+      doc.setPath(("rows", 0, "id"), newJInt(7))
+      check doc["rows"][1]["copy"]["id"].getInt == 100
+      doc.setPath(("rows", 2), doc)
+      check doc["rows"][2]["rows"][2]["id"].getInt == 2
+    check liveAllocations() == baseline
+
+  test "nested assignments isolate shared object branches":
+    var doc = initJsonObject()
+    let row = parseJsonValue("""{"id":0}""")
+    for i in 0 ..< 128:
+      doc["row" & $i] = row
+    let snapshot = doc
+    for i in 0 ..< 128:
+      let key = "row" & $i
+      doc.setPath((key, "id"), newJInt(i + 1))
+    for i in 0 ..< 128:
+      let key = "row" & $i
+      check doc[key]["id"].getInt == i + 1
+      check snapshot[key]["id"].getInt == 0
+
+  test "failed nested assignments preserve the document and release their values":
+    let baseline = liveAllocations()
+    block:
+      var doc = parseJsonValue("""{"rows":[{"id":1}]}""")
+      let before = doc
+      expect KeyError:
+        doc.setPath(("rows", 0, "missing", "id"), newJString("unused"))
+      expect IndexDefect:
+        doc.setPath(("rows", 1, "id"), newJString("unused"))
+      expect ValueError:
+        doc.setPath(("rows", 0, "id", "key"), newJString("unused"))
+      check doc == before
+    check liveAllocations() == baseline
 
   test "objects compare and hash by contents":
     let a = parseJsonValue("""{"a":1,"b":[true]}""")

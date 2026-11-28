@@ -49,14 +49,6 @@ proc add*(node: var JsonNode, item: sink JsonNode) =
   requireKind(node.kind, JArray)
   node.elements.add(item)
 
-proc `[]=`*(node: var JsonNode, key: string | ImmStr, item: sink JsonNode) =
-  requireKind(node.kind, JObject)
-  node.members[immKey(key)] = item
-
-proc `[]=`*(node: var JsonNode, i: Natural, item: sink JsonNode) =
-  requireKind(node.kind, JArray)
-  node.elements[i] = item
-
 proc toJson*[T](value: T, opt = initToJsonOptions()): JsonValue
 proc fromJson*[T](value: var T, node: JsonValue, opt = Joptions())
 proc jsonTo*[T](node: JsonValue, target: typedesc[T], opt = Joptions()): T =
