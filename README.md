@@ -334,6 +334,9 @@ work with code points. `toOpenArray` and `toCString` give read-only views
 of the bytes. Keep the owning `ImmStr` alive while using either view. Building a new string (`&`, slicing) copies; use
 `FlexStr` for long text that is edited often.
 
+Native builds use the platform's `memchr` for character and one-byte pattern
+searches.
+
 API: `toImmStr`, `len`, `[]` (also `^i` and slices), `isEmpty`,
 `toOpenArray`, `toCString`, `$`, `items`, `pairs`, `runes`, `runeLen`,
 `validateUtf8`, `&`, `find`, `contains`/`in`, `startsWith`, `endsWith`,
