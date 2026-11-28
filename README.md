@@ -15,6 +15,7 @@ versions can be handed between threads with no locks, under `--mm:arc`,
 | thetos          | immer                      | Structure                                   |
 |-----------------|----------------------------|---------------------------------------------|
 | `TrieMap[K, V]` | `immer::map`               | CHAMP hash trie, 32-way, 64-bit hashes      |
+| `TrieMultiMap[K, V]` | (no equivalent)       | Packed leaf or RRB tree of grouped values   |
 | `TrieSet[T]`    | `immer::set`               | CHAMP hash trie                             |
 | `TrieVec[T]`    | `immer::vector`            | 32-way radix-balanced tree with tail        |
 | `FlexVec[T]`    | `immer::flex_vector`       | relaxed radix-balanced (RRB) tree with tail |
@@ -41,7 +42,7 @@ assert w[0] == 1              # `w` still sees the old element
 ```
 
 `import thetos` brings in every container. Each one also has its own
-module (`thetos/triemap`, `thetos/trieset`, `thetos/trievec`,
+module (`thetos/triemap`, `thetos/triemultimap`, `thetos/trieset`, `thetos/trievec`,
 `thetos/flexvec`, `thetos/box`, `thetos/atom`, `thetos/immstr`,
 `thetos/flexstr`). Thread-local variants with
 non-atomic reference counts live in `thetos/local`; see
@@ -133,6 +134,46 @@ assert "changed 2: two -> deux" in changes
 API: `initTrieMap`, `toTrieMap`, `len`, `contains`/`in`, `hasKey`, `[]`,
 `getOrDefault`, `get`, `[]=`, `del`, `put`, `erase`, `update`, `updateIt`,
 `pairs`, `keys`, `values`, `diff`, `==`, `hash`, `$`.
+
+## TrieMultiMap
+
+`TrieMultiMap[K, V]` stores each distinct key in one header alongside its hash.
+Values for a key occupy consecutive slots in insertion order, including duplicates.
+The map handle is two pointers wide. An empty map allocates nothing. The first
+32 associations fit in one packed leaf that grows from one value slot. A 32-bit
+bitmap marks the start of each key's values, so repeated slots use only their
+value storage. A leaf with up to four distinct keys compares keys directly.
+Leaves with more keys search by hash.
+
+The 33rd association promotes the leaf to an RRB tree. Its first slot for each
+key points to the same boxed header, and the following slots carry an empty
+header pointer. Deletion compacts the tree back into one packed leaf once 16
+or fewer associations remain. Keys need `hash` and `==`.
+
+```nim
+import thetos
+
+var tags = toTrieMultiMap({"nim": 3, "rrb": 9, "nim": 5})
+let before = tags
+tags.add("nim", 3)
+assert tags.len == 4 and tags.keyCount == 2
+assert tags.count("nim") == 3
+assert tags["nim"] == @[3, 5, 3]
+tags.del("nim", 3)                      # remove the first matching value
+assert tags["nim"] == @[5, 3] and before["nim"] == @[3, 5]
+tags.del("nim")                         # remove the whole key
+assert "nim" notin tags
+```
+
+`values(key)` iterates a snapshot directly and yields nothing for a missing
+key. `m[key]` copies the values into a sequence and raises `KeyError` on a
+miss. `keys` yields distinct keys, and `pairs` yields every association.
+`insert` and both forms of `erase` return new versions.
+
+Inner nodes record the largest run-header hash in each subtree that contains
+a header. Finding a run takes O(log n) for a unique hash among n associations.
+When distinct keys share a hash, lookup checks those keys in turn and skips
+their value runs. Iterating a run of k values then takes O(k).
 
 ## TrieSet
 
@@ -542,7 +583,7 @@ API: `newAtomRef`, `load`, `store`, `exchange`, `update`, `updateIt`,
 
 Atomic reference counts cost a little on every copy and update. For values
 that never leave one thread, `thetos/local` has the same containers with
-plain counts: `local.TrieMap`, `local.TrieSet`, `local.TrieVec`,
+plain counts: `local.TrieMap`, `local.TrieMultiMap`, `local.TrieSet`, `local.TrieVec`,
 `local.FlexVec` and `local.Box`. They are built from the same source and
 have the same API, but they are distinct types, so a program can use both
 kinds side by side.

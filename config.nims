@@ -12,8 +12,9 @@ proc testFiles(): seq[string] =
 # Container suites that do not need threads. They are rerun with
 # --threads:off (plain reference counts) and, with -d:thetosTestLocal,
 # against thetos/local.
-const containerTests = ["tests/ttriemap.nim", "tests/ttrieset.nim", "tests/ttrievec.nim",
-  "tests/tflexvec.nim", "tests/tflexdeque.nim", "tests/tbox.nim", "tests/timmstr.nim", "tests/tflexstr.nim"]
+const containerTests = ["tests/ttriemap.nim", "tests/ttriemultimap.nim", "tests/ttrieset.nim",
+  "tests/ttrievec.nim", "tests/tflexvec.nim", "tests/tflexdeque.nim", "tests/tbox.nim",
+  "tests/timmstr.nim", "tests/tflexstr.nim"]
 const threadsOffTests = @containerTests & "tests/tjsonutils.nim"
 
 task test, "run unit tests":

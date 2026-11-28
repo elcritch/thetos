@@ -18,11 +18,31 @@ template childShift(T: typedesc, level: int): int =
   level + (leafBits(T) - flexBits)
 
 type
+  MultiKeyHeader {.pure, inheritable.} = object
+    code*: uint64
+
+  MultiKey[K] = object of MultiKeyHeader
+    key*: K
+
+  MultiEntry[K, V] = object ## Only the first value in a key's run owns a key header.
+    head*: Box[MultiKey[K]]
+    value*: V
+
+template hasKeyHeaders(T: typedesc): bool =
+  when compiles(default(T).head[]):
+    typeof(default(T).head[]) is MultiKeyHeader
+  else:
+    false
+
+type
   FlexNode[T] = object
     rc*: RcCount # exported for the generic refcount helpers in core
     count: int
     leaf: bool
     relaxed: bool ## inner node indexed through its size table
+    when hasKeyHeaders(T):
+      hasKeys: bool ## this subtree contains at least one run header
+      lastHash: uint64 ## hash of its rightmost header when hasKeys is set
 
   FlexPtr[T] = ptr FlexNode[T]
 
@@ -70,6 +90,24 @@ template sizeArr[T](n: FlexPtr[T]): ptr UncheckedArray[int] =
 template elemArr[T](n: FlexPtr[T]): ptr UncheckedArray[T] =
   cast[ptr UncheckedArray[T]](cast[uint](n) +
     uint(alignUp(sizeof(FlexNode[T]), alignof(T))))
+
+proc lastKeyHash[K, V](n: FlexPtr[MultiEntry[K, V]], code: var uint64): bool =
+  if n.leaf:
+    for i in countdown(n.count - 1, 0):
+      if not n.elemArr[i].head.isEmpty:
+        code = n.elemArr[i].head[].code
+        return true
+  elif n.hasKeys:
+    code = n.lastHash
+    return true
+
+template refreshLastHash[T](n: FlexPtr[T]) =
+  when hasKeyHeaders(T):
+    n.hasKeys = false
+    for i in countdown(n.count - 1, 0):
+      if lastKeyHash(n.childArr[i], n.lastHash):
+        n.hasKeys = true
+        break
 
 proc allocFlexLeaf[T](): FlexPtr[T] =
   static:
@@ -159,6 +197,7 @@ proc finishInner[T](n: FlexPtr[T], s: int, sizes: openArray[int]): int {.discard
     result += sizes[k]
     n.sizeArr[k] = result
   n.relaxed = not regular
+  refreshLastHash(n)
 
 proc finishInner[T](n: FlexPtr[T], s: int): int {.discardable.} =
   var sizes {.noinit.}: array[flexWidth, int]
@@ -194,6 +233,7 @@ proc clone[T](n: FlexPtr[T], count: int): FlexPtr[T] {.noinline.} =
     copyMem(result.sizeArr, n.sizeArr, count * sizeof(int))
   result.count = count
   result.relaxed = n.relaxed
+  refreshLastHash(result)
 
 proc ensureOwned[T](slot: var FlexPtr[T]) =
   if not isUnique(slot):
@@ -272,6 +312,39 @@ template tailStart(v: FlexImpl): int =
   ## Index of the first element in the tail.
   (if v.tail == nil: 0 else: v.size - v.tail.count)
 
+proc findKeyStart[K, V](
+    n: FlexPtr[MultiEntry[K, V]], level, start: int, code: uint64
+): int =
+  ## Local offset of the first qualifying run header, or -1.
+  if n.leaf:
+    for i in start ..< n.count:
+      if not n.elemArr[i].head.isEmpty and n.elemArr[i].head[].code >= code:
+        return i
+  elif n.hasKeys and n.lastHash >= code:
+    let (first, offset) = findChild(n, level, start)
+    var skip = offset
+    for j in first ..< n.count:
+      let found = findKeyStart(n.childArr[j], level - flexBits, skip, code)
+      if found >= 0:
+        return childStart(n, level, j) + found
+      skip = 0
+  -1
+
+proc nextKeyStart[K, V](v: FlexVec[MultiEntry[K, V]], start: int, code: uint64): int =
+  ## First run header at or after start with hash >= code, or the vector length.
+  if start >= v.size:
+    return v.size
+  let off = v.tailStart
+  if start < off:
+    let found = findKeyStart(v.root, v.shift, start, code)
+    if found >= 0:
+      return found
+  let found = findKeyStart(v.tail, 0, max(0, start - off), code)
+  if found >= 0:
+    off + found
+  else:
+    v.size
+
 proc leafAt[T](root: FlexPtr[T], shift, idx: int): (FlexPtr[T], int) =
   ## The leaf holding element `idx` of the tree and the index of its first
   ## element.
@@ -341,6 +414,7 @@ proc newPath[T](level: int, node: FlexPtr[T]): FlexPtr[T] =
   result = allocFlexInner[T]()
   result.childArr[0] = newPath(level - flexBits, node)
   result.count = 1
+  refreshLastHash(result)
 
 proc roomOnRight[T](n: FlexPtr[T], shift: int): bool =
   ## True when a leaf can be appended below the inner node `n` without
@@ -371,6 +445,7 @@ proc pushLeafRec[T](slot: var FlexPtr[T], s: int, leaf: FlexPtr[T], leafSize: in
     if n.relaxed:
       n.sizeArr[n.count] = n.sizeArr[last] + leafSize
     inc n.count
+  refreshLastHash(n)
 
 proc pushLeaf[T](root: var FlexPtr[T], shift: var int, leaf: FlexPtr[T]) =
   ## Appends `leaf` (ownership transferred) as the last leaf of the tree.
@@ -448,6 +523,7 @@ proc assocRec[T](slot: var FlexPtr[T], s, idx: int, value: var T) =
   else:
     let (j, local) = findChild(slot, s, idx)
     assocRec(slot.childArr[j], s - flexBits, local, value)
+    refreshLastHash(slot)
 
 proc `[]=`*[T; H: auto = FlexNoHead](v: var FlexImpl[T, H], i: Natural, x: sink T) =
   ## Replaces element `i` in this vector value only.
@@ -488,6 +564,7 @@ proc treeTake[T](slot: var FlexPtr[T], s, n: int) =
     treeTake(slot.childArr[j], s - flexBits, m)
   if slot.relaxed:
     slot.sizeArr[j] = n
+  refreshLastHash(slot)
 
 proc truncate[T, H](v: var FlexImpl[T, H], n: int) =
   ## Keeps the first `n` elements.
@@ -1143,6 +1220,35 @@ proc nextLeaf[T, H](c: var LeafCursor[T, H]): FlexPtr[T] {.inline.} =
       return c.descendLeft(root)
   result = c.tail
   c.tail = nil
+
+iterator entriesBetween[T](v: FlexVec[T], first, past: int): lent T =
+  ## Seek once, then walk consecutive leaves without copying boundary elements.
+  if first < past:
+    let keep = `=dup`(v)
+    var c: LeafCursor[T, FlexNoHead]
+    var leaf = keep.tail
+    var offset = first - keep.tailStart
+    if offset < 0:
+      c.tail = keep.tail
+      leaf = keep.root
+      offset = first
+      var level = keep.shift
+      while not leaf.leaf:
+        let (j, local) = findChild(leaf, level, offset)
+        c.stack[c.depth] = (leaf, j + 1)
+        inc c.depth
+        leaf = leaf.childArr[j]
+        level -= flexBits
+        offset = local
+    var remaining = past - first
+    while remaining > 0:
+      let count = min(leaf.count - offset, remaining)
+      for i in offset ..< offset + count:
+        yield leaf.elemArr[i]
+      remaining -= count
+      if remaining > 0:
+        leaf = c.nextLeaf()
+        offset = 0
 
 iterator chunks*[T; H: auto = FlexNoHead](
     v: FlexImpl[T, H]

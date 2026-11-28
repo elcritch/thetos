@@ -2,7 +2,7 @@
 ## containers must not depend on atomic `ref` counting.
 
 import std/[unittest, typedthreads]
-import thetos/[atom, triemap, trievec, trieset]
+import thetos/[atom, triemap, triemultimap, trievec, trieset]
 
 const
   threadCount = 8
@@ -86,6 +86,28 @@ suite "threads":
       check baseVec[i] == $i
     base = initTrieMap[int, int]()
     baseVec = initTrieVec[string]()
+
+  test "threads edit shared packed and tree multimaps independently":
+    type Roots = tuple[small, large: TrieMultiMap[int, string]]
+    proc edit(roots: Roots) {.thread.} =
+      for i in 1 .. 100:
+        var small = roots.small
+        var large = roots.large
+        small.add(1, $i)
+        large.del(1)
+        doAssert small.count(1) == 1 and large == roots.small
+
+    var roots: Roots
+    roots.small.add(0, "original")
+    roots.large = roots.small
+    for i in 0 ..< 32:
+      roots.large.add(1, $i)
+    var workers: array[threadCount, Thread[Roots]]
+    for i in 0 ..< workers.len:
+      createThread(workers[i], edit, roots)
+    joinThreads(workers)
+    check roots.small[0] == @["original"] and roots.small.len == 1
+    check roots.large[0] == @["original"] and roots.large.count(1) == 32
 
   test "sets cross threads through an atom":
     var a {.global.}: Atom[TrieSet[int]]

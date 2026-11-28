@@ -133,6 +133,12 @@ proc isUnique*[N](n: ptr N): bool {.inline.} =
 proc raiseIndex*(i, size: int) {.noinline, noreturn.} =
   raise newException(IndexDefect, "index " & $i & " not in 0 .. " & $(size - 1))
 
+proc raiseKeyError*[K](key: K) {.noinline, noreturn.} =
+  when compiles($key):
+    raise newException(KeyError, "key not found: " & $key)
+  else:
+    raise newException(KeyError, "key not found")
+
 proc mixHash*(h: Hash): uint64 {.inline.} =
   ## Spreads a user hash over 64 bits (murmur3 finalizer), so weak hashes
   ## (identity, multiples of 32, 32-bit hashes) still give balanced tries.
@@ -170,14 +176,6 @@ proc ownedCopy*[T](value: T): T {.inline.} =
   resetOnError(result):
     result = value
 
-proc appendCopy*[V, T](v: var V, x: T) {.inline.} =
-  mixin add
-  when supportsCopyMem(T):
-    v.add(x)
-  else:
-    # An implicit `=dup` for the sink argument can strand a partial copy in
-    # its result. Copy into a local whose cleanup is under our control.
-    var value: T
-    resetOnError(value):
-      value = x
-    v.add(move(value))
+template appendCopy*(v, x: untyped) =
+  ## Resolve the container's add overload where it is defined.
+  v.add(ownedCopy(x))

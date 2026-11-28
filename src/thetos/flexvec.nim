@@ -37,6 +37,7 @@ runnableExamples:
 import std/[hashes, macros, options, typetraits]
 import ./private/core
 import ./trievec
+from ./box import Box, isEmpty, `[]`
 
 type RcCount = DefaultRc
 

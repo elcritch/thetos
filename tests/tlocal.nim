@@ -22,6 +22,7 @@ template compileFixture(flags: static string): untyped =
 suite "thetos/local":
   test "local and atomic containers are distinct types":
     check not (local.TrieMap[int, int] is thetos.TrieMap[int, int])
+    check not (local.TrieMultiMap[int, int] is thetos.TrieMultiMap[int, int])
     check not (local.TrieSet[int] is thetos.TrieSet[int])
     check not (local.TrieVec[int] is thetos.TrieVec[int])
     check not (local.FlexVec[int] is thetos.FlexVec[int])
@@ -56,6 +57,9 @@ suite "thetos/local":
       Sequence[T] = seq[T]
 
     check holdsLocalContainers(local.TrieMap[int, int])
+    check holdsLocalContainers(local.TrieMultiMap[int, int])
+    check holdsLocalContainers(thetos.TrieMultiMap[local.Box[int], int])
+    check not holdsLocalContainers(thetos.TrieMultiMap[int, int])
     check holdsLocalContainers(local.Box[string])
     check holdsLocalContainers(local.ImmStr)
     check holdsLocalContainers(local.FlexStr)
