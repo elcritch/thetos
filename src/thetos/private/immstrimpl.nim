@@ -2,6 +2,9 @@
 # The including module imports `std/[atomics, hashes, unicode]` and `private/core`,
 # and declares `RcCount`, the type of each node's `rc`.
 
+when defined(c) or defined(cpp) or defined(objc):
+  from system/ansi_c import c_memchr
+
 type
   ImmStrNode = object
     rc*: RcCount # exported for the generic refcount helpers in core
@@ -209,23 +212,34 @@ proc `&`*(a: ImmStr, b: openArray[char]): ImmStr =
 proc `&`*(a: openArray[char], b: ImmStr): ImmStr =
   concat(a, toOpenArray(b))
 
+proc find*(s: ImmStr, c: char, start: Natural = 0): int =
+  ## Byte index of the first `c` at or after `start`, or -1.
+  let size = s.len
+  if start >= size:
+    return -1
+  let bytes = s.node.strBytes
+  when defined(c) or defined(cpp) or defined(objc):
+    let found = c_memchr(addr bytes[start], cint(c), csize_t(size - start))
+    if found != nil:
+      return cast[int](found) -% cast[int](bytes)
+  else:
+    for i in int(start) ..< size:
+      if bytes[i] == c:
+        return i
+  -1
+
 proc find*(s: ImmStr, sub: openArray[char], start: Natural = 0): int =
   ## Byte index of the first occurrence of `sub` at or after `start`, or -1.
   if sub.len == 0:
     return (if start <= s.len: int(start) else: -1)
+  if sub.len == 1:
+    return s.find(sub[0], start)
   var i = int(start)
   while i <= s.len - sub.len:
     if s.node.strBytes[i] == sub[0] and
         cmpMem(addr s.node.strBytes[i], unsafeAddr sub[0], sub.len) == 0:
       return i
     inc i
-  -1
-
-proc find*(s: ImmStr, c: char, start: Natural = 0): int =
-  ## Byte index of the first `c` at or after `start`, or -1.
-  for i in int(start) ..< s.len:
-    if s.node.strBytes[i] == c:
-      return i
   -1
 
 proc contains*(s: ImmStr, sub: openArray[char]): bool {.inline.} =

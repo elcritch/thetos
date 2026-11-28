@@ -2,7 +2,7 @@
 ## -d:thetosTrackAllocs (see timmstr.nims); also run against thetos/local
 ## with -d:thetosTestLocal.
 
-import std/[unittest, hashes, unicode, random, algorithm, math]
+import std/[unittest, hashes, unicode, random, algorithm, math, strutils]
 when defined(thetosTestLocal):
   import thetos/local
 else:
@@ -71,6 +71,18 @@ suite "ImmStr":
     check s.startsWith("abc") and s.endsWith("cabc") and not s.endsWith("ab")
     check s.find("bc", high(int)) == -1
     check s.find("") == 0 and s.startsWith("") and s.endsWith("")
+
+  test "byte search respects length and start offsets":
+    check default(ImmStr).find('\0') == -1
+    let s = toImmStr("a\0\xff" & repeat('x', 64) & "a\0\xff")
+    check s.find('\0') == 1
+    check s.find("\0", 2) == 68
+    check s.find('\xff', 3) == 69
+    check s.find('a', 1) == 67
+    check s.find('z') == -1
+    check s.find('\0', 69) == -1
+    check s.find('\0', s.len) == -1
+    check s.find('\0', high(int)) == -1
 
   test "UTF-8":
     let s = toImmStr("añb€😀")
