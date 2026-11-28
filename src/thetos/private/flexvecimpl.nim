@@ -383,6 +383,27 @@ proc `[]`*[T; H: auto = FlexNoHead](v: FlexImpl[T, H], i: Natural): lent T =
     s -= flexBits
   n.elemArr[idx]
 
+proc writableValue[T](v: var FlexVec[T], i: Natural): var T =
+  # Only for element types without subtree metadata to update after a write.
+  static:
+    doAssert not hasKeyHeaders(T)
+  checkFlexIndex(v, i)
+  let off = v.size - v.tail.count
+  if i >= off:
+    ensureOwned(v.tail)
+    return v.tail.elemArr[i - off]
+  var slot = addr v.root
+  var idx = int(i)
+  var s = v.shift
+  while s > 0:
+    ensureOwned(slot[])
+    let (j, local) = findChild(slot[], s, idx)
+    slot = addr slot[].childArr[j]
+    idx = local
+    s -= flexBits
+  ensureOwned(slot[])
+  return slot[].elemArr[idx]
+
 proc `[]`*[T; H: auto = FlexNoHead](v: FlexImpl[T, H], i: BackwardsIndex): lent T =
   v[v.size - int(i)]
 

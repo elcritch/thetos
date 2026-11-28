@@ -128,27 +128,49 @@ proc replaceSlot[E](slot: var ChampPtr[E], fresh: ChampPtr[E], stolen: bool) =
     release(slot)
   slot = fresh
 
-proc champFind[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E =
+template findInChamp(root, needle, h: untyped, writable: static bool): untyped =
   mixin `==`
   var n = root
+  when writable:
+    var slot = addr root
+  template found(i: int) =
+    when writable:
+      ensureOwned(slot[])
+      return addr slot[].entryArr[i]
+    else:
+      return addr n.entryArr[i]
+
   var shift = 0
   while n != nil:
     if shift >= hashBits:
-      let es = n.entryArr
       for i in 0 ..< int(n.nentries):
-        if es[i].key == key:
-          return addr es[i]
+        if n.entryArr[i].key == needle:
+          found(i)
       return nil
     let bit = bitpos(h, shift)
     if (n.datamap and bit) != 0:
-      let e = addr n.entryArr[index(n.datamap, bit)]
-      return (if e.key == key: e else: nil)
+      let i = index(n.datamap, bit)
+      if n.entryArr[i].key == needle:
+        found(i)
+      return nil
     elif (n.nodemap and bit) != 0:
-      n = n.childArr[index(n.nodemap, bit)]
+      let child = index(n.nodemap, bit)
+      when writable:
+        ensureOwned(slot[])
+        slot = addr slot[].childArr[child]
+        n = slot[]
+      else:
+        n = n.childArr[child]
       shift += champBits
     else:
       return nil
-  nil
+  return nil
+
+proc champFind[E, K](root: ChampPtr[E], key: K, h: uint64): ptr E =
+  findInChamp(root, key, h, false)
+
+proc champFindOwned[E, K](root: var ChampPtr[E], key: K, h: uint64): ptr E =
+  findInChamp(root, key, h, true)
 
 proc mergeTwo[E](
     a: sink E, ha: uint64, b: sink E, hb: uint64, shift: int
