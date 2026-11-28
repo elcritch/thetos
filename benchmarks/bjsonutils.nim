@@ -39,8 +39,8 @@ let iterations =
   else:
     500
 const Operations = [
-  "all", "parse", "render", "encode", "decode", "history", "std-parse", "std-render",
-  "std-encode", "std-decode", "std-history",
+  "all", "parse", "render", "encode", "decode", "edit", "history", "std-parse",
+  "std-render", "std-encode", "std-decode", "std-edit", "std-history",
 ]
 if operation notin Operations or iterations <= 0:
   quit "Usage: bjsonutils [" & Operations.join("|") & "] [iterations]"
@@ -58,8 +58,12 @@ template bench(name: string, body: untyped) =
   if selected(name):
     var best = high(int64)
     for run in 0 ..< (if operation == "all": 7 else: 1):
+      GC_fullCollect()
       let start = getMonoTime()
-      body
+      block:
+        body
+      # Release the round's locals and charge any pending cycles to this round.
+      GC_fullCollect()
       best = min(best, (getMonoTime() - start).inNanoseconds)
     echo name,
       " ", formatFloat(best.float / iterations.float / 1_000, ffDecimal, 2), " µs/op"
@@ -78,6 +82,30 @@ repeatBench("encode", persistent.toJson(source)["rows"].len)
 repeatBench("std-decode", stdJsonUtils.jsonTo(stdValue, Document).rows.len)
 repeatBench("decode", persistent.jsonTo(value, Document).rows.len)
 
+proc editRow(document: json.JsonNode, rowIndex, id: int) =
+  document["rows"][rowIndex]["id"] = json.newJInt(id)
+
+proc editRow(document: var JsonValue, rowIndex, id: int) =
+  let rows = document["rows"]
+  let row = rows[rowIndex].put("id", persistent.toJson(id))
+  document["rows"] = rows.put(rowIndex, row)
+
+template benchEdit(name: string, freshDocument: untyped) =
+  if selected(name):
+    var current = freshDocument
+    var id = 0
+    bench(name):
+      for i in 0 ..< iterations:
+        dec id
+        current.editRow((i * 73) mod source.rows.len, id)
+    let lastRow = ((iterations - 1) * 73) mod source.rows.len
+    let actual = current["rows"][lastRow]["id"].getInt
+    doAssert actual == id
+    checksum = checksum +% int(actual)
+
+benchEdit("std-edit", json.parseJson(text))
+benchEdit("edit", parseJsonValue(text))
+
 template benchHistory(name: string, initial, edit: untyped) =
   if selected(name):
     var retainedBytes: int
@@ -90,6 +118,7 @@ template benchHistory(name: string, initial, edit: untyped) =
         let rowIndex {.inject.} = (i * 73) mod source.rows.len
         let id {.inject.} = -(i + 1)
         history.add(edit)
+      GC_fullCollect()
       retainedBytes = getOccupiedMem() - before
       checksum = checksum +% history.len
     echo name,
@@ -99,12 +128,12 @@ template benchHistory(name: string, initial, edit: untyped) =
 
 benchHistory("std-history", stdValue):
   let changed = previous.copy()
-  changed["rows"][rowIndex]["id"] = json.newJInt(id)
+  changed.editRow(rowIndex, id)
   changed
 
 benchHistory("history", value):
-  let rows = previous["rows"]
-  let row = rows[rowIndex].put("id", persistent.toJson(id))
-  previous.put("rows", rows.put(rowIndex, row))
+  var changed = previous
+  changed.editRow(rowIndex, id)
+  changed
 
 echo "Checksum ", checksum

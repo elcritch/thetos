@@ -12,7 +12,44 @@ versions.
   storage, and edits copy the paths they change. Object member order is
   unspecified.
 
-## Setup
+## ORC on arm64
+
+On the Apple M3 Pro, thetos rendered the document 1.50× faster and decoded
+it 1.38× faster than the stdlib. The stdlib encoded it 1.44× faster.
+
+| Operation | Stdlib JSON | thetos JSON (`97efd2c`) |
+| --- | ---: | ---: |
+| Parse JSON text into a tree | 239.88 µs | 237.67 µs |
+| Render a tree to JSON text | 126.94 µs | 84.60 µs |
+| Encode a Nim `Document` into a tree | 65.40 µs | 94.05 µs |
+| Decode a tree into a Nim `Document` | 74.66 µs | 54.07 µs |
+| Edit the current document | 0.05 µs/edit | 0.54 µs/edit |
+| Edit and retain a snapshot | 118.88 µs/edit | 0.58 µs/edit |
+| Memory retained across 500 edits | 130.12 MiB | 1.02 MiB |
+
+Both APIs ran in the same executable with Nim 2.2.12, ORC, and threads
+enabled. Each timing is the fastest of seven rounds of 500 operations on
+the same 31,129-byte document containing 256 rows. Each round calls
+`GC_fullCollect()` before starting the timer and again after its locals
+leave scope, before stopping the timer.
+
+Both edit workloads replace one row's `id` per operation and visit rows
+in the same order. The current-document workload starts with an independently
+parsed tree outside the timer. The stdlib updates the row in place and
+thetos replaces the edited path. Only the latest document is kept.
+For each retained snapshot the
+stdlib deep-copied the mutable tree before editing one row, while thetos
+copied the changed path and shared the other rows. The history benchmark
+also runs a timed collection with all 501 versions live immediately before
+measuring retained memory.
+
+Run the ORC benchmark from the repository root.
+
+```sh
+nim r -d:release --mm:orc --threads:on benchmarks/bjsonutils.nim all 500
+```
+
+## atomicArc setup
 
 * arm64 ran on an Apple M3 Pro with macOS 15.7.9.
 * amd64 ran on an AMD Ryzen 7 8745HS with FreeBSD 15.1-RELEASE-p1 and
@@ -26,7 +63,7 @@ versions.
   reports the fastest of seven runs of 500 operations. Direct comparisons
   use both APIs in the same executable.
 
-## Results
+## atomicArc results
 
 ### Text I/O
 
@@ -43,36 +80,6 @@ with a parsed tree and produces compact JSON.
 `parseJsonValue` uses the stdlib tokenizer and writes tokens directly
 into persistent containers. The renderer writes to one string buffer and
 appends runs of unescaped bytes together.
-
-### Native typed conversions
-
-The native hook implementation and its baseline (`5d6efc5`) used the same
-benchmark source with a `seq[Row]` on both sides. On the M3 Pro, each timing
-below is the median of three alternating invocations of 2,000 operations,
-built with Nim 2.2.12 and `-d:release` using atomicArc and threads. Each
-operation converts the entire 256-record document. Parsing and rendering
-are outside the timed loop.
-
-| Operation | Via stdlib tree (µs) | Native hooks (µs) | Speedup |
-|---|---:|---:|---:|
-| Encode | 214.98 | 95.86 | 2.24× |
-| Decode | 205.37 | 53.28 | 3.85× |
-
-### Earlier typed conversions through the stdlib
-
-The earlier benchmark converted the same Nim object containing a `FlexVec` of 256
-records. The stdlib calls use the thetos hooks for that vector. Parsing
-and rendering are outside the timed loops.
-
-| Operation | Arch | `std/jsonutils` with `JsonNode` (µs) | `thetos/jsonutils` with `JsonValue` (µs) |
-| --- | --- | ---: | ---: |
-| Encode the Nim object | arm64 | 71.3 | 209.0 |
-| Encode the Nim object | amd64 | 55.83 | 193.44 |
-| Decode into the Nim object | arm64 | 74.0 | 206.7 |
-| Decode into the Nim object | amd64 | 65.14 | 181.70 |
-
-This version delegated typed conversions to the stdlib engine. Each call also converted the tree between
-`JsonNode` and `JsonValue`.
 
 ### Keeping every version
 
@@ -91,25 +98,6 @@ Time includes building and releasing the history. Memory is the change in
 Nim's `getOccupiedMem()` measured while all versions are live, with the
 original tree already allocated.
 
-### Direct text I/O
-
-The initial port used an intermediate `JsonNode` tree to parse and render
-`JsonValue`. Sampling on macOS showed time spent converting and traversing
-that tree. Direct text I/O reduced parse time by about 1.7× on both
-machines. Rendering dropped from 254.8 to 84.1 µs on arm64 and from
-229.89 to 81.89 µs on amd64.
-
-| Operation | Arch | Initial port (`3d2041c`) (µs) | Direct text I/O (`d0a1254`) (µs) |
-| --- | --- | ---: | ---: |
-| Parse text | arm64 | 395.8 | 236.2 |
-| Parse text | amd64 | 399.73 | 236.48 |
-| Render to `string` | arm64 | 254.8 | 84.1 |
-| Render to `string` | amd64 | 229.89 | 81.89 |
-| Encode the Nim object | arm64 | 210.7 | 209.0 |
-| Encode the Nim object | amd64 | 196.35 | 193.44 |
-| Decode into the Nim object | arm64 | 200.0 | 206.7 |
-| Decode into the Nim object | amd64 | 180.33 | 181.70 |
-
 ## Reproducing
 
 Run the benchmark from the repository root. Selecting an operation runs
@@ -125,15 +113,6 @@ On FreeBSD, compile with Clang and pin the process to one CPU.
 ```sh
 nim c -d:release --cc:clang --skipUserCfg:on -o:/tmp/bjsonutils benchmarks/bjsonutils.nim
 cpuset -l 2 /tmp/bjsonutils
-```
-
-Run the same program against the initial port in a temporary directory.
-
-```sh
-baseline=$(mktemp -d)
-git archive 3d2041c config.nims src benchmarks/config.nims | tar -x -C "$baseline"
-cp benchmarks/bjsonutils.nim "$baseline/benchmarks/"
-(cd "$baseline" && nim r -d:release benchmarks/bjsonutils.nim)
 ```
 
 Sample the persistent parsing workload on macOS.
