@@ -39,6 +39,12 @@ proc box*[T](value: sink T): Box[T] =
   initRc(result.node)
   result.node.value = value
 
+proc writableBox[T](b: var Box[T]): var T =
+  # Internal copy-on-write access for an initialized, boxed container root.
+  if not isUnique(b.node):
+    b = box(ownedCopy(b.node.value))
+  b.node.value
+
 proc isEmpty*[T](b: Box[T]): bool {.inline.} =
   ## True for a default-initialized or moved-from box.
   b.node == nil

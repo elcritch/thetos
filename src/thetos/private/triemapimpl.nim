@@ -54,12 +54,6 @@ proc contains*[K, V](m: TrieMap[K, V], key: K): bool =
 proc hasKey*[K, V](m: TrieMap[K, V], key: K): bool =
   m.findEntry(key) != nil
 
-proc raiseKeyError[K](key: K) {.noinline, noreturn.} =
-  when compiles($key):
-    raise newException(KeyError, "key not found: " & $key)
-  else:
-    raise newException(KeyError, "key not found")
-
 proc `[]`*[K, V](m: TrieMap[K, V], key: K): lent V =
   ## Returns the value for `key`. Raises `KeyError` if it is missing.
   let e = m.findEntry(key)

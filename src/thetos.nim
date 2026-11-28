@@ -2,6 +2,7 @@
 ## library immer.
 ##
 ## * `TrieMap[K, V] <thetos/triemap.html>`_: CHAMP hash map
+## * `TrieMultiMap[K, V] <thetos/triemultimap.html>`_: RRB hash multimap
 ## * `TrieSet[T] <thetos/trieset.html>`_: CHAMP hash set
 ## * `TrieVec[T] <thetos/trievec.html>`_: radix-balanced vector
 ## * `FlexVec[T] <thetos/flexvec.html>`_: relaxed radix-balanced vector with
@@ -26,5 +27,6 @@
 ## this module. A program built with `--threads:off` cannot share values
 ## between threads at all, so there every container uses plain counts.
 
-import thetos/[triemap, trieset, trievec, flexvec, box, atom, immstr, flexstr]
-export triemap, trieset, trievec, flexvec, box, atom, immstr, flexstr
+import
+  thetos/[triemap, triemultimap, trieset, trievec, flexvec, box, atom, immstr, flexstr]
+export triemap, triemultimap, trieset, trievec, flexvec, box, atom, immstr, flexstr

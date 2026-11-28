@@ -1,7 +1,7 @@
 ## Thread-local variants of the thetos containers, with plain (non-atomic)
 ## reference counts.
 ##
-## `local.TrieMap`, `local.TrieSet`, `local.TrieVec`, `local.FlexVec` and
+## `local.TrieMap`, `local.TrieMultiMap`, `local.TrieSet`, `local.TrieVec`, `local.FlexVec` and
 ## `local.Box` have the same API and behavior as the containers in
 ## `thetos`, built from the same source. Their reference counts use plain
 ## integer operations, which makes updates of shared versions faster (about
@@ -38,7 +38,8 @@ include ./private/champimpl
 include ./private/triemapimpl
 include ./private/triesetimpl
 include ./private/trievecimpl
-include ./private/flexvecimpl
 include ./private/boximpl
+include ./private/flexvecimpl
+include ./private/triemultimapimpl
 include ./private/immstrimpl
 include ./private/flexstrimpl
